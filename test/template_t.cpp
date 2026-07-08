@@ -402,10 +402,9 @@ private slots:
 		auto projected = georef.toProjectedCoords(LatLon(54.558203, -3.393209), &ok);
 		QVERIFY(ok);
 		auto expected = QPointF{310000, 519000};
-		if (QLineF(projected, expected).length() > 0.5)
-			QCOMPARE(projected, expected);
-		else
-			QVERIFY2(true, "SRS from GeoTIFF is okay");
+		auto const distance = QLineF(projected, expected).length();
+		QVERIFY2(distance <= 1.5,
+		         qPrintable(QStringLiteral("SRS from GeoTIFF differs by %1 m").arg(distance)));
 	}
 #endif
 	

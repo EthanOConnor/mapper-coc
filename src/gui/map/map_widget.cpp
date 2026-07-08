@@ -94,6 +94,7 @@ MapWidget::MapWidget(bool show_help, bool force_antialiasing, QWidget* parent)
  , dragging(false)
  , pinching(false)
  , pinching_factor(1.0)
+ , render_context_update_scheduled(false)
  , below_template_cache_dirty_rect(rect())
  , above_template_cache_dirty_rect(rect())
  , map_cache_dirty_rect(rect())
@@ -128,10 +129,12 @@ void MapWidget::setMapView(MapView* view)
 	{
 		if (this->view)
 		{
-			auto* map = view->getMap();
+			auto* map = this->view->getMap();
 			map->removeMapWidget(this);
 			disconnect(map);
 			disconnect(this->view);
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+				disconnect(map->getTemplate(i), nullptr, this, nullptr);
 		}
 		
 		this->view = view;
@@ -150,6 +153,15 @@ void MapWidget::setMapView(MapView* view)
 			connect(map, &Map::symbolDeleted, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateAdded, this, &MapWidget::updatePlaceholder);
 			connect(map, &Map::templateDeleted, this, &MapWidget::updatePlaceholder);
+			for (int i = 0; i < map->getNumTemplates(); ++i)
+				connect(map->getTemplate(i), &Template::templateStateChanged, this, &MapWidget::scheduleRenderContextUpdate);
+			connect(map, &Map::templateAdded, this, [this](int, Template* temp) {
+				connect(temp, &Template::templateStateChanged, this, &MapWidget::scheduleRenderContextUpdate);
+				scheduleRenderContextUpdate();
+			});
+			connect(map, &Map::templateChanged, this, &MapWidget::scheduleRenderContextUpdate);
+
+			scheduleRenderContextUpdate();
 		}
 		
 		update();
@@ -277,11 +289,50 @@ QRectF MapWidget::mapToViewport(const QRectF& input) const
 	return result;
 }
 
+void MapWidget::scheduleRenderContextUpdate()
+{
+	if (!view || render_context_update_scheduled)
+		return;
+
+	render_context_update_scheduled = true;
+	QTimer::singleShot(0, this, &MapWidget::publishRenderContext);
+}
+
+void MapWidget::publishRenderContext()
+{
+	render_context_update_scheduled = false;
+	if (!view || view->areAllTemplatesHidden())
+		return;
+
+	auto context = currentViewRenderContext();
+
+	auto* map = view->getMap();
+	for (int i = 0; i < map->getNumTemplates(); ++i)
+	{
+		auto* temp = map->getTemplate(i);
+		if (temp->getTemplateState() != Template::Loaded || !view->isTemplateVisible(temp))
+			continue;
+
+		temp->updateRenderContext(context);
+	}
+}
+
+ViewRenderContext MapWidget::currentViewRenderContext() const
+{
+	Q_ASSERT(view);
+
+	ViewRenderContext context;
+	context.visible_map_rect = view->calculateViewedRect(viewportToView(rect()));
+	context.view_zoom = view->getZoom();
+	return context;
+}
+
 void MapWidget::viewChanged(MapView::ChangeFlags changes)
 {
 	setDrawingBoundingBox(drawing_dirty_rect_map, drawing_dirty_rect_border, true);
 	setActivityBoundingBox(activity_dirty_rect_map, activity_dirty_rect_border, true);
 	updateEverything();
+	scheduleRenderContextUpdate();
 	if (changes.testFlag(MapView::ZoomChange))
 		updateZoomDisplay();
 }
@@ -318,6 +369,8 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 						                     qApp->translate("OpenOrienteering::MainWindow", "Error"),
 						                     qApp->translate("OpenOrienteering::Importer", "Failed to load template '%1', reason: %2")
 						                     .arg(temp->getTemplateFilename(), temp->errorString()) );
+					else if (widget)
+						widget->scheduleRenderContextUpdate();
 				}
 			}));
 		}
@@ -335,11 +388,14 @@ void MapWidget::visibilityChanged(MapView::VisibilityFeature feature, bool activ
 		updateEverything();
 		break;
 	}
+
+	scheduleRenderContextUpdate();
 }
 
 void MapWidget::setPanOffset(const QPoint& offset)
 {
 	pan_offset = offset;
+	scheduleRenderContextUpdate();
 	update();
 }
 
@@ -502,7 +558,13 @@ void MapWidget::markTemplateCacheDirty(const QRectF& view_rect, int pixel_border
 		cache_dirty_rect = cache_dirty_rect.united(integer_rect);
 	else
 		cache_dirty_rect = integer_rect;
-	
+
+	// During transient panning, keep shifting the existing template cache.
+	// Async tiled updates can otherwise clear a dirty cache region and leave
+	// temporary white holes until the missing tiles arrive.
+	if (pan_offset != QPoint())
+		return;
+
 	update(integer_rect);
 }
 
@@ -986,6 +1048,7 @@ void MapWidget::resizeEvent(QResizeEvent* event)
 	}
 	
 	QWidget::resizeEvent(event);
+	scheduleRenderContextUpdate();
 }
 
 void MapWidget::mousePressEvent(QMouseEvent* event)
@@ -1414,6 +1477,9 @@ void MapWidget::updateAllDirtyCaches()
 	
 	if (!view->areAllTemplatesHidden())
 	{
+		if (pan_offset != QPoint())
+			return;
+
 		if (below_template_cache_dirty_rect.isValid() && isBelowTemplateVisible())
 			updateTemplateCache(below_template_cache, below_template_cache_dirty_rect, 0, view->getMap()->getFirstFrontTemplate() - 1, true);
 		
