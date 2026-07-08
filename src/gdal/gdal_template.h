@@ -159,8 +159,8 @@ private:
 	void tileWorkerLoop(GDALDatasetH worker_dataset);
 	void queueWantedTiles(const TileWindow& window, bool replace_pending_tiles);
 	QImage readTileImage(GDALDatasetH dataset, int tile_x, int tile_y, int subsampling) const;
-	void onTileLoaded(const GdalTileKey& key, QImage tile_image);
-	void onTileLoadFailed(const GdalTileKey& key);
+	void onTileLoaded(const GdalTileKey& key, QImage tile_image, unsigned int generation);
+	void onTileLoadFailed(const GdalTileKey& key, unsigned int generation);
 	void evictCachedTilesToBudget();
 	void markTileAreaDirty(int tile_x, int tile_y, int subsampling);
 	TileWindow tileWindowForMapRect(const QRectF& map_rect, int subsampling) const;
@@ -191,6 +191,7 @@ private:
 	std::vector<GDALDatasetH> worker_datasets;
 	std::vector<std::thread> worker_threads;
 	std::atomic<bool> worker_stop{false};
+	std::atomic<unsigned int> tile_generation{0};
 	std::mutex queue_mutex;
 	std::condition_variable queue_cv;
 	TileQueue tile_queue;
