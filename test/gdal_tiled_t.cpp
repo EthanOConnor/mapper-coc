@@ -172,7 +172,7 @@ private slots:
 	void initTestCase()
 	{
 		QCoreApplication::setOrganizationName(QString::fromLatin1("OpenOrienteering.org"));
-		QCoreApplication::setApplicationName(QString::fromLatin1(metaObject()->className()));
+		QCoreApplication::setApplicationName(QStringLiteral("GdalTiledTest"));
 		QVERIFY2(QDir::home().exists(), "The home dir must be writable in order to use QSettings.");
 
 		doStaticInitializations();
