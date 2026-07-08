@@ -155,6 +155,7 @@ jobs:
             -DOGR_ENABLE_DRIVER_SQLITE=ON \
             -DGDAL_ENABLE_DRIVER_MBTILES=ON \
             -DGDAL_ENABLE_DRIVER_WMS=ON \
+            -DGDAL_ENABLE_DRIVER_GTIFF=ON \
             -DGDAL_ENABLE_DRIVER_RAW=ON \
             -DGDAL_ENABLE_DRIVER_PNG=ON \
             -DGDAL_ENABLE_DRIVER_JPEG=ON \
@@ -215,6 +216,7 @@ jobs:
           test -f "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| WMS |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| GTiff |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| GPKG |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MVT |' "$DIST_DIR/mapper-gdal-info.txt"
           compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
