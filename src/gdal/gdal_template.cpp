@@ -494,7 +494,7 @@ void GdalTemplate::shutdownTiledSource()
 	cache_order.clear();
 	tile_cache.clear();
 	tile_cache_bytes = 0;
-	tiled_raster_info = {};
+	tiled_raster_info = GdalImageReader::RasterInfo();
 	tiled_raster_size = {};
 	wanted_window = {};
 	tiled_origin_tile = {};
