@@ -391,7 +391,7 @@ public:
 	 * loading goals for future draws.
 	 */
 	virtual void updateRenderContext(const ViewRenderContext& context);
-	
+
 	/** 
 	 * Draws the template using the given painter with the given opacity.
 	 * 
