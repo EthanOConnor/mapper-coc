@@ -34,6 +34,41 @@ if ! grep -q 'qtbase-gcc-11-moc.patch' "$SUPERBUILD_SOURCE_DIR/qt-5.12.10.cmake"
 	patch -d "$SUPERBUILD_SOURCE_DIR" -p1 < "$superbuild_patch"
 fi
 
+cache_github_raw_file()
+{
+	local url=$1
+	local output=$2
+	local api_url=$3
+	local curl_args=(-fsSL -H "Accept: application/vnd.github.raw")
+
+	if [ -n "${GITHUB_TOKEN:-}" ]; then
+		curl_args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
+		curl_args+=(-H "X-GitHub-Api-Version: 2022-11-28")
+	fi
+
+	curl "${curl_args[@]}" "$api_url" -o "$output"
+	sed -i.bak "s|$url|file://$output|g" "$SUPERBUILD_SOURCE_DIR/libkml-1.3.0.cmake"
+}
+
+libkml_cmake="$SUPERBUILD_SOURCE_DIR/libkml-1.3.0.cmake"
+if grep -q 'raw.githubusercontent.com/msys2/MINGW-packages' "$libkml_cmake"; then
+	download_dir="$BUILD_DIR/superbuild-downloads"
+	mkdir -p "$download_dir"
+
+	msys2_ref=d5535441b7435a0e7a7d7dee83b175eae7b48475
+	msys2_base=https://raw.githubusercontent.com/msys2/MINGW-packages/$msys2_ref/mingw-w64-libkml
+	msys2_api_base=https://api.github.com/repos/msys2/MINGW-packages/contents/mingw-w64-libkml
+
+	cache_github_raw_file \
+		"$msys2_base/001-libkml-1.3.0.patch" \
+		"$download_dir/001-libkml-1.3.0.patch" \
+		"$msys2_api_base/001-libkml-1.3.0.patch?ref=$msys2_ref"
+	cache_github_raw_file \
+		"$msys2_base/strptime.c" \
+		"$download_dir/strptime.c" \
+		"$msys2_api_base/strptime.c?ref=$msys2_ref"
+fi
+
 # RelWithDebInfo still produces a release-style APK, but avoids the superbuild
 # toolchain's hard failure on unsigned pure Release packaging.
 cmake -S "$SUPERBUILD_SOURCE_DIR" -B "$BUILD_DIR" -G "$CMAKE_GENERATOR" \
