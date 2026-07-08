@@ -461,6 +461,7 @@ QRectF GdalTemplate::getTemplateExtent() const
 
 void GdalTemplate::shutdownTiledSource()
 {
+	tile_generation.fetch_add(1, std::memory_order_relaxed);
 	worker_stop = true;
 	queue_cv.notify_all();
 	for (auto& worker_thread : worker_threads)
@@ -522,13 +523,14 @@ void GdalTemplate::tileWorkerLoop(GDALDatasetH worker_dataset)
 			loading_tiles.insert(key);
 		}
 
+		auto const generation = tile_generation.load(std::memory_order_relaxed);
 		auto tile = readTileImage(worker_dataset, tile_request.tile_x, tile_request.tile_y, tile_request.subsampling);
 		if (tile.isNull())
 		{
 			QMetaObject::invokeMethod(
 				this,
-				[this, key]() {
-					onTileLoadFailed(key);
+				[this, key, generation]() {
+					onTileLoadFailed(key, generation);
 				},
 				Qt::QueuedConnection);
 			continue;
@@ -536,8 +538,8 @@ void GdalTemplate::tileWorkerLoop(GDALDatasetH worker_dataset)
 
 		QMetaObject::invokeMethod(
 			this,
-			[this, key, tile = std::move(tile)]() mutable {
-				onTileLoaded(key, std::move(tile));
+			[this, key, tile = std::move(tile), generation]() mutable {
+				onTileLoaded(key, std::move(tile), generation);
 			},
 			Qt::QueuedConnection);
 	}
@@ -652,8 +654,11 @@ QImage GdalTemplate::readTileImage(GDALDatasetH dataset, int tile_x, int tile_y,
 }
 
 
-void GdalTemplate::onTileLoaded(const GdalTileKey& key, QImage tile_image)
+void GdalTemplate::onTileLoaded(const GdalTileKey& key, QImage tile_image, unsigned int generation)
 {
+	if (generation != tile_generation.load(std::memory_order_relaxed) || !isTiledSource())
+		return;
+
 	auto it = tile_cache.find(key);
 	if (it != tile_cache.end())
 	{
@@ -678,8 +683,11 @@ void GdalTemplate::onTileLoaded(const GdalTileKey& key, QImage tile_image)
 }
 
 
-void GdalTemplate::onTileLoadFailed(const GdalTileKey& key)
+void GdalTemplate::onTileLoadFailed(const GdalTileKey& key, unsigned int generation)
 {
+	if (generation != tile_generation.load(std::memory_order_relaxed))
+		return;
+
 	std::lock_guard<std::mutex> lock(queue_mutex);
 	loading_tiles.remove(key);
 }

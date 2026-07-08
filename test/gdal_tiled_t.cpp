@@ -424,6 +424,32 @@ private slots:
 		local_template.shutdownTiledSource();
 	}
 
+	void staleTileCompletionIgnoredAfterShutdownTest()
+	{
+		Map map;
+		GdalTemplate temp(QStringLiteral("dummy.tif"), &map);
+		auto const key = GdalTemplate::tileKey(0, 0, 1);
+		auto const stale_generation = temp.tile_generation.load();
+
+		temp.shutdownTiledSource();
+		temp.onTileLoaded(key, QImage(8, 8, QImage::Format_ARGB32_Premultiplied), stale_generation);
+		QVERIFY(temp.tile_cache.isEmpty());
+		QCOMPARE(temp.tile_cache_bytes, qsizetype(0));
+
+		temp.loading_tiles.insert(key);
+		temp.onTileLoadFailed(key, stale_generation);
+		QVERIFY(temp.loading_tiles.contains(key));
+		temp.onTileLoadFailed(key, temp.tile_generation.load());
+		QVERIFY(!temp.loading_tiles.contains(key));
+
+		temp.onTileLoaded(
+			key,
+			QImage(8, 8, QImage::Format_ARGB32_Premultiplied),
+			temp.tile_generation.load());
+		QVERIFY(temp.tile_cache.isEmpty());
+		QCOMPARE(temp.tile_cache_bytes, qsizetype(0));
+	}
+
 	void duplicateLoadedTiledTemplateTest()
 	{
 		QTemporaryDir dir;
