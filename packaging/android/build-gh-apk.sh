@@ -34,11 +34,10 @@ if ! grep -q 'qtbase-gcc-11-moc.patch' "$SUPERBUILD_SOURCE_DIR/qt-5.12.10.cmake"
 	patch -d "$SUPERBUILD_SOURCE_DIR" -p1 < "$superbuild_patch"
 fi
 
-cache_github_raw_file()
+download_github_raw_file()
 {
-	local url=$1
-	local output=$2
-	local api_url=$3
+	local output=$1
+	local api_url=$2
 	local curl_args=(-fsSL -H "Accept: application/vnd.github.raw")
 
 	if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -47,25 +46,21 @@ cache_github_raw_file()
 	fi
 
 	curl "${curl_args[@]}" "$api_url" -o "$output"
-	sed -i.bak "s|$url|file://$output|g" "$SUPERBUILD_SOURCE_DIR/libkml-1.3.0.cmake"
 }
 
 libkml_cmake="$SUPERBUILD_SOURCE_DIR/libkml-1.3.0.cmake"
 if grep -q 'raw.githubusercontent.com/msys2/MINGW-packages' "$libkml_cmake"; then
-	download_dir="$BUILD_DIR/superbuild-downloads"
-	mkdir -p "$download_dir"
-
 	msys2_ref=d5535441b7435a0e7a7d7dee83b175eae7b48475
-	msys2_base=https://raw.githubusercontent.com/msys2/MINGW-packages/$msys2_ref/mingw-w64-libkml
 	msys2_api_base=https://api.github.com/repos/msys2/MINGW-packages/contents/mingw-w64-libkml
 
-	cache_github_raw_file \
-		"$msys2_base/001-libkml-1.3.0.patch" \
-		"$download_dir/001-libkml-1.3.0.patch" \
+	# The pinned superbuild later reads these helper downloads via
+	# <DOWNLOAD_DIR>, so pre-populate the exact DOWNLOAD_NAME files while
+	# preserving the superbuild's SHA256 verification.
+	download_github_raw_file \
+		"$SUPERBUILD_SOURCE_DIR/libkml-1.3.0-mingw.patch" \
 		"$msys2_api_base/001-libkml-1.3.0.patch?ref=$msys2_ref"
-	cache_github_raw_file \
-		"$msys2_base/strptime.c" \
-		"$download_dir/strptime.c" \
+	download_github_raw_file \
+		"$SUPERBUILD_SOURCE_DIR/libkml-1.3.0-strptime.c" \
 		"$msys2_api_base/strptime.c?ref=$msys2_ref"
 fi
 
