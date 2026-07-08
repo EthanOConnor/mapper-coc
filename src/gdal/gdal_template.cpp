@@ -634,12 +634,13 @@ QImage GdalTemplate::readTileImage(GDALDatasetH dataset, int tile_x, int tile_y,
 	INIT_RASTERIO_EXTRA_ARG(extra_arg);
 
 	CPLErrorReset();
+	auto bands = tiled_raster_info.bands;
 	auto result = GDALDatasetRasterIOEx(
 		dataset, GF_Read,
 		src.x(), src.y(), src.width(), src.height(),
 		tile.bits() + tiled_raster_info.band_offset, output_w, output_h,
 		GDT_Byte,
-		tiled_raster_info.bands.count(), tiled_raster_info.bands.data(),
+		bands.count(), bands.data(),
 		tiled_raster_info.pixel_space, tile.bytesPerLine(),
 		tiled_raster_info.band_space,
 		&extra_arg);
