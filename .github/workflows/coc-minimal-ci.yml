@@ -153,6 +153,8 @@ jobs:
             -DOGR_ENABLE_DRIVER_MVT=ON \
             -DOGR_ENABLE_DRIVER_OSM=ON \
             -DOGR_ENABLE_DRIVER_SQLITE=ON \
+            -DOGR_ENABLE_DRIVER_KML=ON \
+            -DOGR_ENABLE_DRIVER_DXF=ON \
             -DGDAL_ENABLE_DRIVER_MBTILES=ON \
             -DGDAL_ENABLE_DRIVER_WMS=ON \
             -DGDAL_ENABLE_DRIVER_GTIFF=ON \
@@ -199,7 +201,13 @@ jobs:
         env:
           GDAL_DATA: /mingw64/share/gdal
           PROJ_DATA: /mingw64/share/proj
-        run: ctest --test-dir "$BUILD_DIR" --output-on-failure
+        run: |
+          test_tmp="$(pwd)/$BUILD_DIR/tmp"
+          mkdir -p "$test_tmp"
+          export TMPDIR="$test_tmp"
+          export TEMP="$(cygpath -w "$test_tmp")"
+          export TMP="$TEMP"
+          ctest --test-dir "$BUILD_DIR" --output-on-failure
 
       - name: Stage portable install tree
         run: |
@@ -219,6 +227,8 @@ jobs:
           grep -q '| GTiff |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| GPKG |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MVT |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| KML |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| DXF |' "$DIST_DIR/mapper-gdal-info.txt"
           compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
 
       - name: Smoke test Mapper startup
