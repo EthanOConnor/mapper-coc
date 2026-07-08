@@ -1,0 +1,340 @@
+name: COC Minimal CI
+
+on:
+  push:
+    branches: [coc/minimal]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build/linux
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ \
+            libgdal-dev libproj-dev libpolyclipping-dev libcups2-dev \
+            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
+            libqt5sensors5-dev libqt5serialport5-dev libqt5network5 \
+            qt5-image-formats-plugins doxygen
+
+      - name: Configure
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$(nproc)"
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      BUILD_DIR: build/macos
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: brew install cmake ninja gdal proj qt@5 doxygen
+
+      - name: Configure
+        run: |
+          export PATH="$(brew --prefix qt@5)/bin:$PATH"
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel "$(sysctl -n hw.logicalcpu)"
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$(sysctl -n hw.logicalcpu)"
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-minimal-macos-arm64-app
+          path: build/macos/src/Mapper.app
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      BUILD_DIR: build/windows-portable
+      DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
+    steps:
+      - name: Configure checkout line endings
+        shell: powershell
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v6
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: minimal
+          update: true
+          cache: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-gdb
+            mingw-w64-x86_64-proj
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-libtiff
+            mingw-w64-x86_64-libgeotiff
+            mingw-w64-x86_64-libpng
+            mingw-w64-x86_64-libjpeg-turbo
+            mingw-w64-x86_64-expat
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-xz
+            mingw-w64-x86_64-qt5-base
+            mingw-w64-x86_64-qt5-imageformats
+            mingw-w64-x86_64-qt5-location
+            mingw-w64-x86_64-qt5-sensors
+            mingw-w64-x86_64-qt5-serialport
+            mingw-w64-x86_64-qt5-tools
+            mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-nsis
+            mingw-w64-x86_64-doxygen
+
+      - name: Build minimal GDAL
+        run: |
+          GDAL_VERSION=3.11.0
+          curl -fsSL "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz" \
+            | tar xz -C /tmp
+          cmake -S "/tmp/gdal-${GDAL_VERSION}" -B /tmp/gdal-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/mingw64 \
+            -DBUILD_APPS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF \
+            -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+            -DGDAL_USE_SQLITE3=ON \
+            -DOGR_ENABLE_DRIVER_GPX=ON \
+            -DOGR_ENABLE_DRIVER_GPKG=ON \
+            -DOGR_ENABLE_DRIVER_MVT=ON \
+            -DOGR_ENABLE_DRIVER_OSM=ON \
+            -DOGR_ENABLE_DRIVER_SQLITE=ON \
+            -DGDAL_ENABLE_DRIVER_MBTILES=ON \
+            -DGDAL_ENABLE_DRIVER_WMS=ON \
+            -DGDAL_ENABLE_DRIVER_RAW=ON \
+            -DGDAL_ENABLE_DRIVER_PNG=ON \
+            -DGDAL_ENABLE_DRIVER_JPEG=ON \
+            -DGDAL_USE_ARROW=OFF \
+            -DGDAL_USE_PARQUET=OFF \
+            -DGDAL_USE_HDF5=OFF \
+            -DGDAL_USE_NETCDF=OFF \
+            -DGDAL_USE_POPPLER=OFF \
+            -DGDAL_USE_SFCGAL=OFF \
+            -DGDAL_USE_HEIF=OFF \
+            -DGDAL_USE_JXL=OFF \
+            -DGDAL_USE_LIBKML=OFF \
+            -DGDAL_USE_OPENJPEG=OFF \
+            -DGDAL_USE_SPATIALITE=OFF \
+            -DGDAL_USE_RASTERLITE2=OFF
+          cmake --build /tmp/gdal-build --parallel 4
+          cmake --install /tmp/gdal-build
+
+      - name: Configure
+        run: |
+          rm -rf "$BUILD_DIR" "$DIST_DIR"
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DMapper_AUTORUN_SYSTEM_TESTS=OFF \
+            -DMapper_AUTORUN_MANUAL_TESTS=OFF \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_PACKAGE_QT=ON \
+            -DMapper_PACKAGE_PROJ=ON \
+            -DMapper_PACKAGE_GDAL=ON \
+            -DMapper_PACKAGE_ASSISTANT=OFF \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF \
+            -DGDAL_DATA_DIR=/mingw64/share/gdal \
+            -DPROJ_DATA_DIR=/mingw64/share/proj
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel 4
+
+      - name: Test
+        env:
+          GDAL_DATA: /mingw64/share/gdal
+          PROJ_DATA: /mingw64/share/proj
+        run: ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+      - name: Stage portable install tree
+        run: |
+          dist_prefix="$(pwd)/$DIST_DIR"
+          cmake --install "$BUILD_DIR" --prefix "$dist_prefix"
+          "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" > "$DIST_DIR/mapper-gdal-info.txt"
+
+      - name: Validate staged install tree
+        run: |
+          test -f "$DIST_DIR/Mapper.exe"
+          test -f "$DIST_DIR/qt.conf"
+          test -f "$DIST_DIR/gdal/gdalvrt.xsd"
+          test -f "$DIST_DIR/proj/proj.db"
+          test -f "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| WMS |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| GPKG |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| MVT |' "$DIST_DIR/mapper-gdal-info.txt"
+          compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
+
+      - name: Smoke test Mapper startup
+        id: smoke_test
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
+          $mapperExe = Join-Path $rootDir "Mapper.exe"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "mapper-startup.stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "mapper-startup.stderr.txt"
+          Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+          $env:QT_DEBUG_PLUGINS = "1"
+          $env:QT_LOGGING_RULES = "qt.qpa.*=true"
+          $process = Start-Process `
+            -FilePath $mapperExe `
+            -WorkingDirectory $rootDir `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+          if ($process.WaitForExit(10000)) {
+            Write-Host "Mapper.exe exited during startup smoke test with code $($process.ExitCode)."
+            if (Test-Path $stdoutPath) {
+              Write-Host "--- Mapper stdout ---"
+              Get-Content $stdoutPath
+            }
+            if (Test-Path $stderrPath) {
+              Write-Host "--- Mapper stderr ---"
+              Get-Content $stderrPath
+            }
+            "MAPPER_SMOKE_FAILED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
+
+          Stop-Process -Id $process.Id -Force
+
+      - name: Fail on startup smoke test failure
+        if: ${{ env.MAPPER_SMOKE_FAILED == '1' }}
+        shell: powershell
+        run: throw "Mapper.exe failed startup smoke test."
+
+      - name: Create portable ZIP
+        shell: powershell
+        run: |
+          $shortSha = (git rev-parse --short=7 HEAD).Trim()
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE "dist\OpenOrienteering-Mapper-coc-minimal-windows-x64-$shortSha.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR) -DestinationPath $zipPath -CompressionLevel Optimal
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-minimal-windows-x64-portable
+          path: dist/OpenOrienteering-Mapper-coc-minimal-windows-x64-*.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  android:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      BUILD_DIR: build/android-release
+      SUPERBUILD_SOURCE_DIR: .tmp/superbuild
+      SUPERBUILD_REF: 33349002a2dbbb364cfaccf88afcef420bc24d69
+      TARGET: aarch64-linux-android
+      TARGET_ABI: arm64-v8a
+      APP_ID: org.openorienteering.mapper.coc.minimal
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake doxygen graphviz nasm ninja-build patch python3-lxml \
+            sharutils unzip zip \
+            '^libxcb.*-dev' libglu1-mesa-dev libx11-xcb-dev libxi-dev libxrender-dev
+
+      - name: Check out superbuild
+        run: |
+          git clone --depth 1 https://github.com/OpenOrienteering/superbuild.git "$SUPERBUILD_SOURCE_DIR"
+          git -C "$SUPERBUILD_SOURCE_DIR" fetch --depth 1 origin "$SUPERBUILD_REF"
+          git -C "$SUPERBUILD_SOURCE_DIR" checkout --detach "$SUPERBUILD_REF"
+
+      - name: Compute artifact metadata
+        run: |
+          source_sha="$(git rev-parse --short=7 HEAD)"
+          echo "SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=OpenOrienteering-Mapper-coc-minimal-android-${TARGET_ABI}-${source_sha}.apk" >> "$GITHUB_ENV"
+
+      - name: Build Android APK
+        env:
+          ANDROID_INSTALL_ROOT: ${{ github.workspace }}/.tmp/android-sdk
+        run: |
+          bash packaging/android/build-gh-apk.sh \
+            "$SUPERBUILD_SOURCE_DIR" \
+            . \
+            "$BUILD_DIR" \
+            "$TARGET" \
+            "$APP_ID" \
+            "$BUILD_DIR/release/$ASSET_NAME"
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-minimal-android-arm64-apk
+          path: ${{ env.BUILD_DIR }}/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
