@@ -4,6 +4,11 @@ on:
   push:
     branches: [coc/minimal]
   workflow_dispatch:
+    inputs:
+      build_android:
+        description: Build the Android APK (slow, ~70 min)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +25,7 @@ jobs:
       BUILD_DIR: build/linux
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
     steps:
       - uses: actions/checkout@v6
 
@@ -34,11 +40,14 @@ jobs:
             qt5-image-formats-plugins doxygen
 
       - name: Restore compiler cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: ccache-linux-${{ github.sha }}
           restore-keys: ccache-linux-
+
+      - name: Zero compiler cache statistics
+        run: ccache -z
 
       - name: Configure
         run: |
@@ -54,7 +63,15 @@ jobs:
         run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
 
       - name: Show compiler cache statistics
+        if: always()
         run: ccache -s
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
 
       - name: Test
         env:
@@ -72,6 +89,7 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: 1
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
     steps:
       - uses: actions/checkout@v6
 
@@ -79,11 +97,14 @@ jobs:
         run: brew install cmake ninja ccache gdal proj qt@5 doxygen
 
       - name: Restore compiler cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: ccache-macos-${{ github.sha }}
           restore-keys: ccache-macos-
+
+      - name: Zero compiler cache statistics
+        run: ccache -z
 
       - name: Configure
         run: |
@@ -108,7 +129,15 @@ jobs:
         run: cmake --build "$BUILD_DIR" --parallel "$(sysctl -n hw.logicalcpu)"
 
       - name: Show compiler cache statistics
+        if: always()
         run: ccache -s
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-macos-${{ github.sha }}
 
       - name: Test
         env:
@@ -160,8 +189,10 @@ jobs:
       BUILD_DIR: build/windows-portable
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
       VERSION_DISPLAY: 0.9.7-COC.1
+      GDAL_VERSION: 3.11.5
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
     steps:
       - name: Configure checkout line endings
         shell: powershell
@@ -174,7 +205,9 @@ jobs:
         with:
           msystem: MINGW64
           path-type: minimal
-          update: true
+          # No full system upgrade: keeps runs deterministic and fast.
+          # Bump packages deliberately by clearing the msys2 cache.
+          update: false
           cache: true
           install: >-
             mingw-w64-x86_64-toolchain
@@ -203,22 +236,38 @@ jobs:
             mingw-w64-x86_64-nsis
             mingw-w64-x86_64-doxygen
 
+      # Key the GDAL cache on the exact MSYS2 package set so a package
+      # re-resolve (msys2 cache miss) invalidates cached GDAL binaries
+      # that were linked against older MSYS2 libraries.
+      - name: Record MSYS2 package versions
+        run: pacman -Q > .msys2-packages.txt
+
+      - name: Restore minimal GDAL install
+        id: gdal-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: gdal-stage
+          key: gdal-${{ env.GDAL_VERSION }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+
       - name: Restore compiler cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: ccache-windows-${{ github.sha }}
           restore-keys: ccache-windows-
 
+      - name: Zero compiler cache statistics
+        run: ccache -z
+
       - name: Build minimal GDAL
+        if: steps.gdal-cache.outputs.cache-hit != 'true'
         run: |
-          GDAL_VERSION=3.11.0
-          curl -fsSL "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz" \
-            | tar xz -C /tmp
+          curl -fsSLO "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz"
+          curl -fsSLO "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz.md5"
+          md5sum -c "gdal-${GDAL_VERSION}.tar.gz.md5"
+          tar xzf "gdal-${GDAL_VERSION}.tar.gz" -C /tmp
           cmake -S "/tmp/gdal-${GDAL_VERSION}" -B /tmp/gdal-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX=/mingw64 \
             -DBUILD_APPS=OFF \
             -DBUILD_TESTING=OFF \
@@ -251,7 +300,27 @@ jobs:
             -DGDAL_USE_SPATIALITE=OFF \
             -DGDAL_USE_RASTERLITE2=OFF
           cmake --build /tmp/gdal-build --parallel 4
-          cmake --install /tmp/gdal-build
+          # DESTDIR is unreliable on Windows (drive-letter stripping);
+          # stage with an explicit install prefix instead.
+          cmake --install /tmp/gdal-build --prefix "$(pwd)/gdal-stage/mingw64"
+
+      # Save immediately so a failure later in the job (Mapper build,
+      # tests, packaging) does not discard the expensive GDAL build.
+      - name: Save minimal GDAL install
+        if: steps.gdal-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: gdal-stage
+          key: gdal-${{ env.GDAL_VERSION }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+
+      - name: Install minimal GDAL into MSYS2 prefix
+        run: |
+          test -d gdal-stage/mingw64 || {
+            echo "::error::gdal-stage/mingw64 missing - GDAL staging failed"
+            find gdal-stage -maxdepth 3 -type d 2>/dev/null | head -20
+            exit 1
+          }
+          cp -a gdal-stage/mingw64/. /mingw64/
 
       - name: Configure
         run: |
@@ -278,7 +347,15 @@ jobs:
         run: cmake --build "$BUILD_DIR" --parallel 4
 
       - name: Show compiler cache statistics
+        if: always()
         run: ccache -s
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
 
       - name: Test
         env:
@@ -475,7 +552,11 @@ jobs:
           compression-level: 0
 
   android:
-    runs-on: ubuntu-22.04
+    # Skipped on push until CI modernization (superbuild caching, disk
+    # management) — see https://github.com/EthanOConnor/mapper/pull/9.
+    # Run on demand via workflow_dispatch with build_android=true.
+    if: ${{ inputs.build_android }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
       BUILD_DIR: build/android-release
