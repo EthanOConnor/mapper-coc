@@ -201,6 +201,10 @@ jobs:
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
       VERSION_DISPLAY: 0.9.7-COC.2
       GDAL_VERSION: 3.11.5
+      # Bump whenever the "Build minimal GDAL" recipe changes (driver
+      # list, CMake flags): the cache key does not see the recipe, so
+      # without a bump a stale GDAL build would be reused.
+      GDAL_RECIPE_REV: 1
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
       CCACHE_COMPILERCHECK: content
@@ -269,7 +273,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: gdal-stage
-          key: gdal-${{ env.GDAL_VERSION }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+          key: gdal-${{ env.GDAL_VERSION }}-r${{ env.GDAL_RECIPE_REV }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
 
       - name: Restore compiler cache
         uses: actions/cache/restore@v6
@@ -333,7 +337,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: gdal-stage
-          key: gdal-${{ env.GDAL_VERSION }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+          key: gdal-${{ env.GDAL_VERSION }}-r${{ env.GDAL_RECIPE_REV }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
 
       - name: Install minimal GDAL into MSYS2 prefix
         run: |
