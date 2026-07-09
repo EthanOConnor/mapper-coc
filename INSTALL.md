@@ -2,6 +2,21 @@
 
 This document is about building OpenOrienteering Mapper from source code. 
 
+## Fork CI and Release Builds
+
+The COC fork uses GitHub Actions for repeatable committee-test builds while
+upstream-targeted feature branches stay focused on product behavior.  The
+minimal COC branch may carry fork-only CI and packaging modernization that is
+not part of an upstream pull request.
+
+This modernization is time-sensitive.  The macOS minimal build still uses
+Homebrew `qt@5` because the upstream codebase is Qt 5 based, and Homebrew warns
+that `qt@5` is deprecated and scheduled to be disabled on 2027-05-19.  The
+`full-speed-ahead` branch has already made the Qt 6 migration and first-pass
+all-platform GitHub CI work.  Keeping that build modernization separate from
+upstream product changes gives the fork a supported path for native GitHub
+builds before the Qt 5 packaging route expires.
+
 The general build process prerequisites are:
  - A supported platform: 
    - Linux. Ubuntu 18.04 is known to work.
