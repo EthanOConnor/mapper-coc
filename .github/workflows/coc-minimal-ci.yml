@@ -322,7 +322,7 @@ jobs:
         run: |
           mkdir -p dist
           cpack --config "$BUILD_DIR/CPackConfig.cmake" -G NSIS -B dist
-          short_sha="$(git rev-parse --short=7 HEAD)"
+          short_sha="${GITHUB_SHA:0:7}"
           installer="$(find dist -maxdepth 1 -type f -name '*.exe' | head -n 1)"
           test -n "$installer"
           target="dist/OpenOrienteering-Mapper-coc-minimal-windows-x64-installer-$short_sha.exe"
