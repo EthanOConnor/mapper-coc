@@ -430,6 +430,9 @@ jobs:
           compression-level: 0
 
   android:
+    # Disabled until CI modernization (superbuild caching, disk management).
+    # Re-enable by removing this condition.
+    if: ${{ false }}
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     env:
