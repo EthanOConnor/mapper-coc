@@ -52,6 +52,8 @@ jobs:
     timeout-minutes: 45
     env:
       BUILD_DIR: build/macos
+      DIST_DIR: dist/macos-arm64
+      APP_ZIP: coc-minimal-macos-arm64-app.zip
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
@@ -67,8 +69,14 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
             -DMapper_USE_GDAL=ON \
+            -DMapper_PACKAGE_QT=ON \
+            -DMapper_PACKAGE_PROJ=ON \
+            -DMapper_PACKAGE_GDAL=ON \
+            -DMapper_PACKAGE_ASSISTANT=OFF \
             -DMapper_MANUAL_QTHELP=OFF \
-            -DMapper_MANUAL_PDF=OFF
+            -DMapper_MANUAL_PDF=OFF \
+            -DGDAL_DATA_DIR="$(brew --prefix gdal)/share/gdal" \
+            -DPROJ_DATA_DIR="$(brew --prefix proj)/share/proj"
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --parallel "$(sysctl -n hw.logicalcpu)"
@@ -78,13 +86,39 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$(sysctl -n hw.logicalcpu)"
 
+      - name: Stage app bundle
+        run: |
+          export PATH="$(brew --prefix qt@5)/bin:$PATH"
+          rm -rf "$DIST_DIR"
+          cmake --install "$BUILD_DIR" --prefix "$DIST_DIR" --strip
+
+      - name: Validate staged app bundle
+        run: |
+          app="$DIST_DIR/Mapper.app"
+          test -x "$app/Contents/MacOS/Mapper"
+          test -f "$app/Contents/Resources/qt.conf"
+          test -f "$app/Contents/Resources/proj/proj.db"
+          test -f "$app/Contents/Resources/gdal/gdalvrt.xsd"
+          test -d "$app/Contents/Frameworks"
+          otool -L "$app/Contents/MacOS/Mapper"
+          if otool -L "$app/Contents/MacOS/Mapper" | grep -E '/opt/homebrew/opt/(qt@5|gdal|proj)'; then
+            echo "Mapper still links to Homebrew Qt/GDAL/PROJ libraries"
+            exit 1
+          fi
+
+      - name: Create app ZIP
+        run: |
+          ditto -c -k --keepParent "$DIST_DIR/Mapper.app" "$DIST_DIR/$APP_ZIP"
+          unzip -l "$DIST_DIR/$APP_ZIP" | grep -q '^.*Mapper.app/Contents/MacOS/Mapper$'
+
       - name: Upload app bundle
         uses: actions/upload-artifact@v7
         with:
           name: coc-minimal-macos-arm64-app
-          path: build/macos/src/Mapper.app
+          path: dist/macos-arm64/coc-minimal-macos-arm64-app.zip
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
 
   windows:
     runs-on: windows-2022
