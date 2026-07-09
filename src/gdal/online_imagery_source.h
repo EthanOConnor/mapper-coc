@@ -29,8 +29,8 @@ namespace OpenOrienteering {
 /**
  * Describes an online imagery source detected from user input.
  *
- * Phase 1 supports only tiled sources: XYZ/TMS URL templates and ArcGIS
- * cached MapServer services.
+ * Phase 1 supports only top-origin Web Mercator XYZ URL templates and
+ * standard cached Web Mercator ArcGIS MapServer services.
  */
 struct OnlineImagerySource
 {

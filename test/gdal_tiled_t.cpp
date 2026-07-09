@@ -22,10 +22,12 @@
 
 #include <QtTest>
 #include <QBuffer>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
@@ -43,6 +45,7 @@
 #include "gdal/gdal_manager.h"
 #include "gdal/gdal_template.h"
 #include "gdal/online_imagery_template_builder.h"
+#include "gui/widgets/online_template_dialog.h"
 #include "templates/template.h"
 
 namespace OpenOrienteering {
@@ -242,10 +245,10 @@ private slots:
 		         QStringLiteral("https://server.example.test/ArcGIS/rest/services/World_Imagery/MapServer"));
 
 		auto xyz = OnlineImageryTemplateBuilder::classifyUrl(
-			QStringLiteral("https://tile.openstreetmap.org/{z}/{x}/{y}.png"));
+			QStringLiteral("https://tiles.example.test/{z}/{x}/{y}.png"));
 		QCOMPARE(xyz.source.kind, OnlineImagerySource::Kind::XyzTiles);
 		QCOMPARE(xyz.source.normalized_url,
-		         QStringLiteral("https://tile.openstreetmap.org/${z}/${x}/${y}.png"));
+		         QStringLiteral("https://tiles.example.test/${z}/${x}/${y}.png"));
 		QCOMPARE(xyz.source.tile_size, QSize(256, 256));
 		QCOMPARE(xyz.source.max_tile_level, 19);
 
@@ -266,6 +269,38 @@ private slots:
 		auto unsupported = OnlineImageryTemplateBuilder::classifyUrl(
 			QStringLiteral("https://tiles.example.test/{s}/{z}/{x}/{y}.png"));
 		QVERIFY(!unsupported.error.isEmpty());
+
+		auto unrecognized = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://tiles.example.test/not-a-template"));
+		QVERIFY(unrecognized.error.contains(QStringLiteral("top-origin Web Mercator XYZ")));
+	}
+
+	void onlineImageryChooserContainsOnlyRecentSourcesTest()
+	{
+		QSettings settings;
+		settings.remove(QStringLiteral("onlineImagery"));
+
+		Map map;
+		OnlineTemplateDialog empty_dialog(map, QString{}, QRectF{});
+		auto* empty_chooser = empty_dialog.findChild<QComboBox*>();
+		QVERIFY(empty_chooser);
+		QCOMPARE(empty_chooser->count(), 1);
+		QCOMPARE(empty_chooser->itemText(0), QStringLiteral("Choose a recent source"));
+
+		settings.setValue(
+			QStringLiteral("onlineImagery/recentUrls"),
+			QStringList{QStringLiteral("https://tiles.example.test/{z}/{x}/{y}.png")});
+		settings.setValue(
+			QStringLiteral("onlineImagery/recentNames"),
+			QStringList{QStringLiteral("Example imagery")});
+
+		OnlineTemplateDialog recent_dialog(map, QString{}, QRectF{});
+		auto* recent_chooser = recent_dialog.findChild<QComboBox*>();
+		QVERIFY(recent_chooser);
+		QCOMPARE(recent_chooser->count(), 3);
+		QCOMPARE(recent_chooser->itemText(2), QStringLiteral("Example imagery"));
+
+		settings.remove(QStringLiteral("onlineImagery"));
 	}
 
 	void onlineImageryCoordinateMathTest()
@@ -310,8 +345,8 @@ private slots:
 
 		OnlineImagerySource source;
 		source.kind = OnlineImagerySource::Kind::XyzTiles;
-		source.display_name = QStringLiteral("openstreetmap");
-		source.normalized_url = QStringLiteral("https://tile.openstreetmap.org/${z}/${x}/${y}.png");
+		source.display_name = QStringLiteral("example imagery");
+		source.normalized_url = QStringLiteral("https://tiles.example.test/${z}/${x}/${y}.png");
 
 		auto named_path = OnlineImageryTemplateBuilder::outputFileName(
 			dir.filePath(QStringLiteral("wilburton.omap")),
@@ -325,7 +360,7 @@ private slots:
 			dir.filePath(QStringLiteral("wilburton.omap")),
 			source,
 			QString{});
-		QVERIFY(QFileInfo(default_path).fileName().startsWith(QStringLiteral("openstreetmap_wilburton_online_")));
+		QVERIFY(QFileInfo(default_path).fileName().startsWith(QStringLiteral("example_imagery_wilburton_online_")));
 	}
 
 	void tiledCoreMathTest()
