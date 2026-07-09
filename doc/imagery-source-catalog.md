@@ -67,6 +67,8 @@ The following are intentionally not part of the first implementation:
 - catalog signing or a trust/reputation system;
 - arbitrary HTTP authentication or secrets in catalogs;
 - arbitrary GDAL XML or PROJ pipelines supplied by a catalog;
+- checksum-based detection of placeholder/empty tile images, which the first
+  GDAL WMS/TMS rendering path cannot express;
 - general WMS, WMTS, OGC API Tiles, or STAC service discovery; and
 - execution of affine or grid-shift registrations until the required
   GDAL VRT/warp path is implemented and tested.
@@ -172,6 +174,11 @@ The initial filename suffix is `.oom-imagery.json`. The proposed media type is
 That media type is unregistered and is only a useful content hint. Mapper
 dispatches on the required `format` and `version` members, never on a filename
 suffix or HTTP Content-Type alone.
+
+The `org.openorienteering.imagery-catalog` format identifier and vendor media
+type are aspirational until accepted by the upstream OpenOrienteering project;
+experimental use by the COC fork does not claim upstream or IANA registration.
+An upstream review may rename them before format version 1 is declared stable.
 
 The term **package** is reserved for a future archive containing the same
 catalog manifest and referenced binary resources such as displacement grids.
@@ -302,6 +309,10 @@ Coverage is descriptive and must not be used in place of tile matrix limits.
 Some ArcGIS services advertise a cache extent much larger than their useful
 imagery coverage.
 
+`elevation` includes raster elevation products and derivatives commonly used
+for orienteering, including DEMs, hillshade, slope imagery, and rasterized
+LiDAR products. Version 1 does not attempt to describe point-cloud access.
+
 All user-facing strings are plain text. HTML supplied by a catalog is never
 rendered.
 
@@ -335,8 +346,7 @@ Version 1 request behavior is intentionally narrow:
 
 - `referer`: an absolute HTTP(S) URL containing no control characters,
   including carriage return or line feed;
-- `emptyHttpStatusCodes`: a unique array of integer HTTP status codes; and
-- `emptyTileChecksums`: optional SHA-256 digests for known placeholder tiles.
+- `emptyHttpStatusCodes`: a unique array of integer HTTP status codes.
 
 Catalogs cannot provide `Authorization`, `Cookie`, `Proxy-Authorization`,
 `Host`, or arbitrary custom headers. URLs containing user information are
@@ -418,7 +428,9 @@ bundled catalogs.
 ## 8. Registration corrections
 
 Registration maps nominal source coordinates into corrected coordinates.
-Direction is never implicit.
+Direction is never implicit. Version 1 permits exactly
+`source-to-corrected`; any other value is invalid rather than being guessed or
+automatically inverted.
 
 ```json
 {
@@ -456,9 +468,11 @@ specifying a conventional CRS where possible.
 ### 8.1 Translation
 
 `translation2d` contains finite `dx` and `dy` values and an explicit unit.
-`unit: crs` means the source/target CRS linear unit. Translation is reversible
-and can be implemented in the first release by shifting the generated GDAL
-data window.
+Version 1 permits exactly `unit: crs`, meaning the shared source/target CRS
+linear unit. Thus an EPSG:2927 translation is expressed in that CRS's US survey
+feet, not metres. Explicit unit conversion requires a later capability.
+Translation is reversible and can be implemented in the first release by
+shifting the generated GDAL data window.
 
 ### 8.2 Affine correction
 
@@ -472,6 +486,9 @@ y' = yoff + s21*x + s22*y
 The determinant must be finite and nonzero. This aligns with the parameters
 used by PROJ's affine operation and EPSG affine/similarity methods while
 remaining readable.
+
+Affine operations likewise use exactly `unit: crs` in version 1. `xoff` and
+`yoff` are in CRS units; `s11`, `s12`, `s21`, and `s22` are dimensionless.
 
 The first release parses, validates, stores, and capability-gates this
 operation. Rendering it requires a GDAL VRT wrapper with an arbitrary affine
@@ -643,6 +660,9 @@ Catalogs are untrusted data. They are never executable configuration.
 - Large-catalog source warning threshold: 100.
 - Maximum redirects: 5.
 - Redirects may not switch to `file:` or another non-HTTP scheme.
+- A fetch that begins with HTTPS may not redirect to HTTP. The downgrade is
+  rejected and reported; a user who intends to load the HTTP destination can
+  enter it explicitly and accept the normal direct-HTTP warning.
 - Scheme, user information, resolved destination class, and byte limits are
   revalidated before every redirect hop. A public catalog URL may not silently
   redirect to a loopback, link-local, or private address; the fetch stops and
@@ -659,7 +679,7 @@ Catalogs are untrusted data. They are never executable configuration.
 - Maximum tile URL templates per source: 8.
 - Maximum tile matrices per matrix set: 64.
 - Maximum vertices across one coverage geometry: 10,000.
-- Maximum empty-tile HTTP codes or checksums per source: 32 each.
+- Maximum empty-tile HTTP codes per source: 32.
 - Duplicate catalog or source IDs are invalid.
 - Nonfinite numeric values are invalid.
 - URL templates must contain exactly the placeholders required by their
@@ -712,6 +732,8 @@ Catalog and source identity must not depend on display names.
 ### 12.1 Catalog identity
 
 The tuple `(catalog id, revision)` identifies a published snapshot.
+The catalog SHA-256 is computed over the exact downloaded/local UTF-8 bytes,
+before parsing or reformatting.
 
 - Same ID, revision, and SHA-256: exact reimport; no changes.
 - Same ID and higher revision: preview added, changed, removed, invalid, and
@@ -745,10 +767,66 @@ aid, not a trust or security boundary; conservative normalization may report
 two equivalent spellings separately rather than risk changing request
 semantics.
 
+### 12.3 Fingerprint encoding
+
+Source fingerprints are lowercase SHA-256 digests of UTF-8 JSON canonicalized
+with the JSON Canonicalization Scheme (JCS), RFC 8785. JCS fixes object-key
+ordering, string escaping, whitespace, literals, and IEEE 754 number
+serialization, so equivalent spellings such as `-0.42` and `-4.2e-1` produce
+the same bytes after parsing. Catalog JSON must satisfy the I-JSON constraints
+required by JCS; duplicate object member names, invalid Unicode, and nonfinite
+or non-IEEE-754-representable numbers are invalid.
+Duplicate member detection happens before construction of any JSON DOM that
+might discard all but one value for a repeated key.
+
+Before JCS serialization, the validator builds a normalized semantic source
+object:
+
+- recognized URL placeholder aliases use `{z}`, `{x}`, and `{y}`;
+- URLs use the conservative normalization in section 12.2;
+- format defaults are materialized;
+- set-like arrays such as `requires` and `emptyHttpStatusCodes` are sorted and
+  deduplicated, while order-significant arrays such as `tiles` and geometry
+  coordinates retain document order; and
+- a known `tileMatrixSetURI` is replaced by the exact bundled matrix-set
+  definition used by the renderer, so URI and equivalent inline forms have the
+  same operational identity.
+
+The full fingerprint hashes a wrapper containing `fingerprintVersion: 1` and
+this complete normalized source object, including its source ID and descriptive
+metadata. The operational fingerprint hashes a synthetic object containing
+exactly:
+
+- `fingerprintVersion`, initially integer `1`;
+- source `type`;
+- normalized `tiles`, `scheme`, and `format`;
+- the resolved tile matrix set, `minTileMatrix`, `maxTileMatrix`, and
+  `tileMatrixLimits`;
+- supported `request` behavior;
+- `registration`; and
+- required operational capabilities.
+
+Name, description, category, dates, coverage, notices, publisher/catalog
+identity, and non-operational extensions are excluded from the operational
+fingerprint. A future change to normalization or field membership increments
+`fingerprintVersion`; it does not silently reinterpret stored version 1
+digests.
+
+Reference: <https://www.rfc-editor.org/rfc/rfc8785.html>
+
 The generated imagery XML filename currently hashes the URL. It must instead
 hash the operational fingerprint so two corrected uses of the same endpoint
-cannot collide. The shortened digest is widened from 6 to at least 12
-hexadecimal characters while this identity is being changed.
+cannot collide. State/index data stores the complete 64-character digest. A
+filename initially uses the first 12 hexadecimal characters; if an existing
+candidate has a different full digest, the prefix is extended in four-character
+increments until unique, up to the complete digest. An unrelated file is never
+overwritten merely because a shortened prefix collides.
+
+This filename change is forward-only. Existing URL-hash XML sidecars are not
+renamed or deleted automatically, because they may still be referenced by map
+files. Re-adding the same source after upgrade can therefore create one new
+fingerprint-named sidecar alongside a legacy sidecar. Cleanup or equivalence-
+based migration is separate future work.
 
 Generated-file identity and tile-cache identity are intentionally different.
 Registration belongs in the generated filename because it changes
@@ -776,8 +854,10 @@ untrusted ID directly as a path.
 
 `catalog.json` is the exact installed snapshot. `state.json` records origin,
 install/fetch time, SHA-256, ETag, Last-Modified, and prior snapshot metadata
-needed for update reporting. Writes use `QSaveFile` and atomic replacement.
-`QSettings` stores only lightweight UI ordering and enablement preferences.
+needed for update reporting, together with fingerprint version and complete
+source digests used by the installed index. Writes use `QSaveFile` and atomic
+replacement. `QSettings` stores only lightweight UI ordering and enablement
+preferences.
 
 URL catalogs are snapshots. Version 1 does not refresh them automatically.
 Persisting ETag and Last-Modified makes a later explicit Reload action
@@ -855,6 +935,7 @@ src/gdal/
   imagery_catalog.h/.cpp
   imagery_catalog_reader.h/.cpp
   imagery_catalog_store.h/.cpp
+  imagery_json_canonicalizer.h/.cpp
   imagery_tile_matrix_set.h/.cpp
   online_imagery_source.h
   online_imagery_template_builder.h/.cpp
@@ -881,6 +962,12 @@ Core JSON, Qt Network, `QStandardPaths`, and `QSaveFile` cover the application
 implementation and are already available in supported Mapper builds. A pinned
 schema validator is a CI/development tool only; the C++ validator remains
 normative.
+
+The RFC 8785 encoder is isolated behind the canonicalizer component and tested
+with the RFC's property-ordering and IEEE 754 vectors. Whether that small
+component is implemented locally or imported under the project's normal
+third-party policy is an upstream implementation decision; its output contract
+is fixed by RFC 8785 rather than by Qt's non-normative JSON serialization.
 
 ## 16. Example and test catalog
 
@@ -931,11 +1018,14 @@ attribution, terms, and product policy.
 - wrong format and unsupported document version;
 - duplicate IDs and invalid revisions;
 - invalid URL templates and forbidden URL/header forms;
-- size, source count, nesting, string, URL mirror, matrix, checksum, and
+- size, source count, nesting, string, URL mirror, matrix, resource, and
   coverage-vertex limits;
 - unknown catalog- and source-level capabilities;
-- strict unknown-field and namespaced-extension behavior; and
-- invalid, singular, or nonfinite registration parameters.
+- strict unknown-field and namespaced-extension behavior;
+- duplicate object member names, invalid Unicode, and invalid JCS numbers;
+- rejection of the deferred `emptyTileChecksums` field in version 1; and
+- invalid direction/unit values, singular affine transforms, and nonfinite
+  registration parameters.
 
 ### 17.2 Informative schema tests
 
@@ -969,7 +1059,15 @@ attribution, terms, and product policy.
 - higher-revision update and removed-source reporting;
 - lower-revision warning;
 - same revision/different hash conflict;
-- full and operational fingerprint duplicates;
+- RFC 8785 canonicalization vectors and stable SHA-256 output;
+- equivalent key order, numeric notation, placeholder spelling, and known
+  URI/inline matrix-set forms produce identical intended fingerprints;
+- descriptive-only changes alter the full fingerprint but not the operational
+  fingerprint;
+- operational changes alter both expected identities;
+- filename prefixes extend safely under a forced 12-character collision;
+- a legacy URL-hash sidecar is preserved when a new fingerprint sidecar is
+  created;
 - atomic installation and rollback on write failure;
 - removal without touching generated templates; and
 - safe paths for malicious or unusual catalog IDs.
@@ -980,6 +1078,7 @@ Use local deterministic HTTP and test-TLS servers to cover:
 
 - successful HTTP and TLS response handling;
 - redirects, redirect limits, and per-hop scheme/address revalidation;
+- rejection of HTTPS-to-HTTP redirect downgrade;
 - Content-Length and streaming hard limits;
 - timeout and partial response;
 - ETag and Last-Modified persistence;
@@ -1059,6 +1158,8 @@ The feature is ready for the first user when all of the following hold:
   nominal tile requests;
 - restart preserves the installed catalog;
 - exact reimport creates no entries;
+- semantically equivalent JSON key order and numeric spelling produce stable
+  full and operational fingerprints;
 - a new revision gives an explicit atomic update preview;
 - removal deletes chooser entries but leaves generated templates intact;
 - malformed, conflicting, or oversized imports make no partial storage
@@ -1078,13 +1179,15 @@ Review should explicitly confirm or change:
 2. `.oom-imagery.json` and the unregistered, non-dispatching media type hint;
 3. a normative C++ validator, informative CI-checked JSON Schema, strict
    fields, and namespaced extensions;
-4. the distinction between a tile matrix set and a surveyed registration;
-5. translation support in the first implementation with affine/grid
+4. SHA-256 fingerprints over versioned RFC 8785 canonical normalized source
+   objects;
+5. the distinction between a tile matrix set and a surveyed registration;
+6. translation support in the first implementation with affine/grid
    capability-gated;
-6. snapshot installation with no automatic refresh;
-7. the 1 MiB/100-source warning and 10 MiB/1,000-source hard limits; and
-8. keeping synthetic upstream fixtures, the real Puget Sound example, and the
+7. snapshot installation with no automatic refresh;
+8. the 1 MiB/100-source warning and 10 MiB/1,000-source hard limits;
+9. keeping synthetic upstream fixtures, the real Puget Sound example, and the
    product's approved bundled catalog as separate concerns;
-9. the high-consequence-only version 1 threat model; and
-10. the split between upstream-candidate implementation commits and
+10. the high-consequence-only version 1 threat model; and
+11. the split between upstream-candidate implementation commits and
     COC-specific catalog/release integration.
