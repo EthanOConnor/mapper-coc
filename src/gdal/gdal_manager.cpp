@@ -339,7 +339,22 @@ private:
 			// The user may overwrite this default in the settings.
 			CPLSetConfigOption("GDAL_DATA", QDir::toNativeSeparators(gdal_data).toLocal8Bit());
 		}
-		
+
+		// GDAL's curl-based drivers (WMS/TMS etc.) need a CA bundle for
+		// HTTPS on systems where curl finds no default trust store, such
+		// as Windows with an OpenSSL-backed libcurl. Prefer a bundled CA
+		// file unless the environment already provides one.
+		auto ca_bundle_applied = false;
+		auto ca_bundle = QFileInfo(QLatin1String("data:/gdal/curl-ca-bundle.crt"));
+		if (ca_bundle.exists()
+		    && !qEnvironmentVariableIsSet("CURL_CA_BUNDLE")
+		    && !qEnvironmentVariableIsSet("SSL_CERT_FILE"))
+		{
+			// The user may overwrite this default in the settings.
+			CPLSetConfigOption("CURL_CA_BUNDLE", QDir::toNativeSeparators(ca_bundle.absoluteFilePath()).toLocal8Bit());
+			ca_bundle_applied = true;
+		}
+
 		const char* defaults[][2] = {
 		    { "CPL_DEBUG",               "OFF" },
 		    { "USE_PROJ_480_FEATURES",   "YES" },
@@ -387,7 +402,8 @@ private:
 		for (const auto& parameter : qAsConst(applied_parameters))
 		{
 			if (!new_parameters.contains(parameter)
-			    && parameter != QLatin1String{ "GDAL_DATA" })
+			    && parameter != QLatin1String{ "GDAL_DATA" }
+			    && !(ca_bundle_applied && parameter == QLatin1String{ "CURL_CA_BUNDLE" }))
 			{
 				CPLSetConfigOption(parameter.toLatin1().constData(), nullptr);
 			}

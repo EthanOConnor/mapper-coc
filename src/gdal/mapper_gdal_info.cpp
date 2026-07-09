@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include <cpl_http.h>
 #include <cpl_string.h>
 #include <gdal.h>
 
@@ -161,10 +162,37 @@ void dumpGdalDrivers()
 }
 
 
-int main(int /*argc*/, char** /*argv*/)
+/*
+ * Fetch an HTTPS URL to prove that certificate verification works with
+ * the configured CA trust (e.g. a packaged CURL_CA_BUNDLE). The content
+ * doesn't matter; only the TLS handshake does.
+ */
+int tlsCheck(const char* url)
+{
+	std::string error;
+	for (int attempt = 0; attempt < 2; ++attempt)
+	{
+		auto* result = CPLHTTPFetch(url, nullptr);
+		auto ok = result && result->nStatus == 0;
+		error = (result && result->pszErrBuf) ? result->pszErrBuf : "no result";
+		CPLHTTPDestroyResult(result);
+		if (ok)
+		{
+			std::cout << "TLS: ok" << std::endl;
+			return 0;
+		}
+	}
+	std::cout << "TLS: FAIL: " << error << std::endl;
+	return 1;
+}
+
+
+int main(int argc, char** argv)
 try
 {
 	GDALAllRegister();
+	if (argc == 3 && std::strcmp(argv[1], "--tls-check") == 0)
+		return tlsCheck(argv[2]);
 	dumpGdalDrivers();
 	return 0;
 }
