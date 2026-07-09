@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 30
     env:
       BUILD_DIR: build/linux
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
     steps:
       - uses: actions/checkout@v6
 
@@ -25,22 +27,34 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ \
+            cmake ninja-build g++ ccache \
             libgdal-dev libproj-dev libpolyclipping-dev libcups2-dev \
             qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
             libqt5sensors5-dev libqt5serialport5-dev libqt5network5 \
             qt5-image-formats-plugins doxygen
 
+      - name: Restore compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+
       - name: Configure
         run: |
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DMapper_USE_GDAL=ON \
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Show compiler cache statistics
+        run: ccache -s
 
       - name: Test
         env:
@@ -56,17 +70,28 @@ jobs:
       APP_ZIP: coc-minimal-macos-arm64-app.zip
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
     steps:
       - uses: actions/checkout@v6
 
       - name: Install dependencies
-        run: brew install cmake ninja gdal proj qt@5 doxygen
+        run: brew install cmake ninja ccache gdal proj qt@5 doxygen
+
+      - name: Restore compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-macos-${{ github.sha }}
+          restore-keys: ccache-macos-
 
       - name: Configure
         run: |
           export PATH="$(brew --prefix qt@5)/bin:$PATH"
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
             -DMapper_USE_GDAL=ON \
             -DMapper_PACKAGE_QT=ON \
@@ -81,6 +106,9 @@ jobs:
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --parallel "$(sysctl -n hw.logicalcpu)"
+
+      - name: Show compiler cache statistics
+        run: ccache -s
 
       - name: Test
         env:
@@ -132,6 +160,8 @@ jobs:
       BUILD_DIR: build/windows-portable
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
       VERSION_DISPLAY: 0.9.7-COC.1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
     steps:
       - name: Configure checkout line endings
         shell: powershell
@@ -150,6 +180,7 @@ jobs:
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
             mingw-w64-x86_64-gdb
             mingw-w64-x86_64-proj
             mingw-w64-x86_64-sqlite3
@@ -172,6 +203,13 @@ jobs:
             mingw-w64-x86_64-nsis
             mingw-w64-x86_64-doxygen
 
+      - name: Restore compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
+          restore-keys: ccache-windows-
+
       - name: Build minimal GDAL
         run: |
           GDAL_VERSION=3.11.0
@@ -179,6 +217,8 @@ jobs:
             | tar xz -C /tmp
           cmake -S "/tmp/gdal-${GDAL_VERSION}" -B /tmp/gdal-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_INSTALL_PREFIX=/mingw64 \
             -DBUILD_APPS=OFF \
             -DBUILD_TESTING=OFF \
@@ -218,6 +258,8 @@ jobs:
           rm -rf "$BUILD_DIR" "$DIST_DIR"
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_TESTING=ON \
             -DMapper_AUTORUN_SYSTEM_TESTS=OFF \
             -DMapper_AUTORUN_MANUAL_TESTS=OFF \
@@ -234,6 +276,9 @@ jobs:
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --parallel 4
+
+      - name: Show compiler cache statistics
+        run: ccache -s
 
       - name: Test
         env:
