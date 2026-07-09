@@ -19,6 +19,9 @@
 message(STATUS "Configuring ${PROJECT_NAME} packaging")
 
 option(Mapper_PACKAGE_QT_ALL_TRANSLATIONS "Add all Qt translations to the packages" OFF)
+set(Mapper_PACKAGE_EXTRA_LIBRARY_DIRS "" CACHE STRING
+  "Additional library directories to search when creating portable packages")
+mark_as_advanced(Mapper_PACKAGE_EXTRA_LIBRARY_DIRS)
 
 function(deploy_qt_translations basename)
 	find_package(Qt5LinguistTools REQUIRED QUIET) # for Qt5::lconvert
@@ -235,6 +238,9 @@ unset(MAPPER_QT_PLUGINS CACHE)
 
 unset(MAPPER_LIB_HINTS)
 unset(MAPPER_LIBS)
+if(Mapper_PACKAGE_EXTRA_LIBRARY_DIRS)
+	list(APPEND MAPPER_LIB_HINTS ${Mapper_PACKAGE_EXTRA_LIBRARY_DIRS})
+endif()
 
 if(Mapper_PACKAGE_PROJ)
 	if(NOT PROJ_DATA_DIR)

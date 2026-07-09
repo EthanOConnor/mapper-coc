@@ -73,6 +73,7 @@ jobs:
             -DMapper_PACKAGE_PROJ=ON \
             -DMapper_PACKAGE_GDAL=ON \
             -DMapper_PACKAGE_ASSISTANT=OFF \
+            -DMapper_PACKAGE_EXTRA_LIBRARY_DIRS="$(brew --prefix)/lib" \
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF \
             -DGDAL_DATA_DIR="$(brew --prefix gdal)/share/gdal" \
