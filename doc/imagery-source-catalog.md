@@ -7,13 +7,13 @@ OpenOrienteering Mapper. It covers the interchange format, import and
 installation behavior, validation, source identity, custom tile grids, and
 future surveyed registration corrections.
 
-The first implementation is intended for **OpenOrienteering Mapper — COC
-Edition: Base** (short form: **OOM — COC Edition: Base**), the conservative
-preview line in contrast to `full-speed-ahead`. This naming keeps Mapper's
-OpenOrienteering identity primary rather than implying a COC-owned fork. The
-format and implementation are deliberately OpenOrienteering-neutral. Nothing
-in the core format is tied to COC, a particular imagery provider, or a
-particular jurisdiction.
+The first implementation is intended for **Mapper (COC Base)**, the
+conservative preview line in contrast to `full-speed-ahead`. The short
+user-facing name reads as an edition of Mapper rather than a separate COC-owned
+product. Formal attribution, licensing, and upstream references continue to
+use **OpenOrienteering Mapper**. The format and implementation are deliberately
+OpenOrienteering-neutral. Nothing in the core format is tied to COC, a
+particular imagery provider, or a particular jurisdiction.
 
 ## 1. Problem statement
 
