@@ -241,7 +241,12 @@ jobs:
       # re-resolve (msys2 cache miss) invalidates cached GDAL binaries
       # that were linked against older MSYS2 libraries.
       - name: Record MSYS2 package versions
-        run: pacman -Q > .msys2-packages.txt
+        run: |
+          pacman -Q > .msys2-packages.txt
+          # ca-certificates fills this file in a post-install scriptlet;
+          # pacman reports success even if that scriptlet fails, leaving
+          # a zero-byte bundle. Fail here, where it can be attributed.
+          test -s /mingw64/etc/ssl/certs/ca-bundle.crt
 
       - name: Restore minimal GDAL install
         id: gdal-cache
@@ -376,13 +381,15 @@ jobs:
           dist_prefix="$(pwd)/$DIST_DIR"
           cmake --install "$BUILD_DIR" --prefix "$dist_prefix"
           "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" > "$DIST_DIR/mapper-gdal-info.txt"
+          cp "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" "$DIST_DIR/"
 
       - name: Validate staged install tree
         run: |
           test -f "$DIST_DIR/Mapper.exe"
           test -f "$DIST_DIR/qt.conf"
           test -f "$DIST_DIR/gdal/gdalvrt.xsd"
-          test -f "$DIST_DIR/gdal/curl-ca-bundle.crt"
+          certs=$(grep -c -- '-----BEGIN CERTIFICATE-----' "$DIST_DIR/gdal/curl-ca-bundle.crt" || true)
+          test "$certs" -ge 100 || { echo "::error::CA bundle has only $certs certificates"; exit 1; }
           test -f "$DIST_DIR/proj/proj.db"
           test -f "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
@@ -393,6 +400,19 @@ jobs:
           grep -q '| KML |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| DXF |' "$DIST_DIR/mapper-gdal-info.txt"
           compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
+
+      # Run from the packaged tree via PowerShell (not the MSYS2 shell) so
+      # the shipped DLLs and the shipped CA bundle are what get exercised.
+      - name: Smoke test HTTPS certificate verification
+        shell: powershell
+        run: |
+          $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
+          $env:CURL_CA_BUNDLE = Join-Path $rootDir "gdal\curl-ca-bundle.crt"
+          $output = (& (Join-Path $rootDir "mapper-gdal-info.exe") --tls-check https://example.com/ 2>&1) -join "`n"
+          Write-Host $output
+          if ($LASTEXITCODE -ne 0 -or $output -notmatch "TLS: ok") {
+            throw "Packaged GDAL/curl failed HTTPS certificate verification."
+          }
 
       - name: Smoke test Mapper startup
         id: smoke_test
@@ -504,6 +524,10 @@ jobs:
             if (-not (Test-Path (Join-Path $rootDir $requiredPath))) {
               throw "Installed tree is missing $requiredPath."
             }
+          }
+          $caCount = (Select-String -Path (Join-Path $rootDir "gdal\curl-ca-bundle.crt") -Pattern "BEGIN CERTIFICATE" -SimpleMatch).Count
+          if ($caCount -lt 100) {
+            throw "Installed CA bundle has only $caCount certificates."
           }
           if (-not (Get-ChildItem -Path $rootDir -Filter "Qt5*.dll" | Select-Object -First 1)) {
             throw "Installed tree is missing Qt runtime DLLs."

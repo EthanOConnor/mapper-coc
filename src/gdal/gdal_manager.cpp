@@ -344,6 +344,7 @@ private:
 		// HTTPS on systems where curl finds no default trust store, such
 		// as Windows with an OpenSSL-backed libcurl. Prefer a bundled CA
 		// file unless the environment already provides one.
+		auto ca_bundle_applied = false;
 		auto ca_bundle = QFileInfo(QLatin1String("data:/gdal/curl-ca-bundle.crt"));
 		if (ca_bundle.exists()
 		    && !qEnvironmentVariableIsSet("CURL_CA_BUNDLE")
@@ -351,6 +352,7 @@ private:
 		{
 			// The user may overwrite this default in the settings.
 			CPLSetConfigOption("CURL_CA_BUNDLE", QDir::toNativeSeparators(ca_bundle.absoluteFilePath()).toLocal8Bit());
+			ca_bundle_applied = true;
 		}
 
 		const char* defaults[][2] = {
@@ -401,7 +403,7 @@ private:
 		{
 			if (!new_parameters.contains(parameter)
 			    && parameter != QLatin1String{ "GDAL_DATA" }
-			    && parameter != QLatin1String{ "CURL_CA_BUNDLE" })
+			    && !(ca_bundle_applied && parameter == QLatin1String{ "CURL_CA_BUNDLE" }))
 			{
 				CPLSetConfigOption(parameter.toLatin1().constData(), nullptr);
 			}
