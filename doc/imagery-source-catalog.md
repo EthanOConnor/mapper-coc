@@ -38,15 +38,17 @@ An imagery source catalog must:
 
 The first implementation includes:
 
-- a versioned JSON catalog format and published JSON Schema;
+- a versioned JSON catalog format and an informative JSON Schema for authoring
+  tools;
 - strict parsing and semantic validation;
-- standard and inline OGC tile matrix sets;
+- standard and inline OGC tile matrix sets that satisfy the dyadic pyramid
+  profile the GDAL WMS/TMS renderer can represent;
 - local-file and HTTP(S) catalog import;
 - an import preview, duplicate/conflict reporting, and large-catalog warning;
 - per-user persistent catalog snapshots and catalog removal;
 - catalog entries in the existing online imagery source chooser;
-- generic source-CRS tile-grid cropping, including the Pierce County
-  EPSG:2927 grid used by the test fixture;
+- generic source-CRS tile-grid cropping, including a synthetic EPSG:2927 grid
+  derived from the Pierce County service used by the test fixture;
 - runtime support for two-dimensional translation corrections;
 - explicit representation and safe capability handling for affine and grid
   corrections; and
@@ -70,6 +72,24 @@ The schema defines affine and grid-shift operations now so that catalog
 authors do not need a later incompatible format. A source requiring an
 operation unsupported by the running Mapper build is retained but disabled.
 It must never be rendered using its uncorrected nominal georeferencing.
+
+### 2.3 Threat model and priorities
+
+Catalogs are untrusted data, but version 1 does not attempt to solve every
+possible trust or privacy concern around remote imagery.
+
+The first implementation must prevent consequences outside the intended
+imagery workflow: code execution, arbitrary local file access, credential
+disclosure, XML or HTTP-header injection, unexpected requests to local or
+link-local services during catalog fetch, persistent state corruption,
+unbounded resource consumption, and silently incorrect georeferencing.
+
+The first implementation does not try to hide requested map extents from an
+imagery provider, authenticate the pixels returned by that provider, detect a
+provider serving unexpected imagery, establish publisher reputation, or give
+repeated warnings about hosts the user intentionally installed. Catalog
+signatures and stronger content provenance remain possible future work, but
+they are not release gates for this feature.
 
 ## 3. Terminology
 
@@ -136,8 +156,19 @@ The catalog therefore uses a small OpenOrienteering JSON wrapper, familiar
 TileJSON and Editor Layer Index concepts where appropriate, and OGC 2D Tile
 Matrix Set objects for grid definitions.
 
+The OGC object is the interchange model, not a promise that the first renderer
+can draw every valid OGC pyramid. GDAL's WMS/TMS mini-driver exposes one tile
+size and a sequence of overview levels, each exactly half the preceding
+resolution. Version 1 therefore defines a renderable dyadic profile in
+section 7.3 and capability-gates valid OGC matrix sets outside that profile.
+The GDAL WMTS driver is not a general escape hatch for plain XYZ endpoints: it
+selects matrix sets advertised by a WMTS GetCapabilities document.
+
 The initial filename suffix is `.oom-imagery.json`. The proposed media type is
 `application/vnd.openorienteering.imagery-catalog+json`.
+That media type is unregistered and is only a useful content hint. Mapper
+dispatches on the required `format` and `version` members, never on a filename
+suffix or HTTP Content-Type alone.
 
 The term **package** is reserved for a future archive containing the same
 catalog manifest and referenced binary resources such as displacement grids.
@@ -150,37 +181,46 @@ References:
 - <https://www.ogc.org/standards/tms/>
 - <https://schemas.opengis.net/tms/2.0/json/>
 - <https://github.com/radiantearth/stac-spec>
+- <https://gdal.org/en/stable/drivers/raster/wms.html>
+- <https://gdal.org/en/stable/drivers/raster/wmts.html>
 
 ## 6. Catalog document
 
-Catalog files are UTF-8 JSON. The normative JSON Schema uses
-`additionalProperties: false` for defined objects. Future experimental data
-belongs under a namespaced `extensions` object rather than as arbitrary
-top-level members.
+Catalog files are UTF-8 JSON. The hand-written C++ reader and semantic
+validator are normative for Mapper behavior. The published JSON Schema is
+informative: it supplies editor completion, catches structural authoring
+errors, and is tested against the same fixtures, but it is not loaded by the
+application and cannot express all cross-field, CRS, or rendering checks.
+
+The schema uses `additionalProperties: false`, and the C++ validator rejects
+the same unknown members. Future experimental data belongs under a namespaced
+`extensions` object rather than as arbitrary top-level members. CI runs valid
+and invalid fixtures through the C++ validator and a pinned JSON Schema
+validator to detect drift; if they disagree, the C++ validator determines
+application behavior and the schema is fixed.
 
 An illustrative catalog is:
 
 ```json
 {
-  "$schema": "https://openorienteering.org/schemas/imagery-catalog/v1.json",
   "format": "org.openorienteering.imagery-catalog",
   "version": 1,
-  "id": "org.cascadeoc.imagery.puget-sound-example",
+  "id": "org.example.mapping.imagery-demo",
   "revision": 1,
-  "name": "Puget Sound imagery examples",
-  "description": "Example definitions for catalog and grid testing.",
+  "name": "Example imagery catalog",
+  "description": "Synthetic definitions for catalog and grid testing.",
   "publisher": {
-    "name": "Cascade Orienteering Club",
-    "url": "https://cascadeoc.org/"
+    "name": "Example Mapping Club",
+    "url": "https://www.example.org/"
   },
   "updated": "2026-07-09",
   "sources": [
     {
-      "id": "wa.king.aerial-2025",
-      "name": "King County Aerial 2025",
+      "id": "aerial-2025",
+      "name": "Example Aerial 2025",
       "type": "raster-tiles",
       "tiles": [
-        "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2025/MapServer/tile/{z}/{y}/{x}"
+        "https://tiles.example.test/aerial-2025/{z}/{y}/{x}"
       ],
       "scheme": "xyz",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
@@ -190,15 +230,16 @@ An illustrative catalog is:
         "emptyHttpStatusCodes": [404]
       },
       "notices": {
-        "sourceUrl": "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2025/MapServer"
+        "sourceUrl": "https://www.example.org/imagery/aerial-2025"
       }
     }
   ]
 }
 ```
 
-The example is deliberately a source definition, not a statement that the
-imagery is approved for every use or should be bundled in the product.
+The normative example uses reserved example domains. Real-source examples are
+kept separate from the format definition and do not imply that imagery is
+approved for every use or should be bundled in the product.
 
 ### 6.1 Required catalog members
 
@@ -214,8 +255,8 @@ imagery is approved for every use or should be bundled in the product.
   It is the identity used for catalog updates.
 
 `revision`
-: Positive monotonically increasing integer. Changing catalog content should
-  increment it.
+: Positive integer that increases across publications carrying the same
+  catalog `id`. Changing catalog content should increment it.
 
 `name`
 : Plain-text user-facing catalog name.
@@ -226,6 +267,9 @@ imagery is approved for every use or should be bundled in the product.
 
 ### 6.2 Optional catalog members
 
+- `$schema`: informational URI for authoring tools; Mapper never dereferences
+  it and no canonical OpenOrienteering URL is assumed until the upstream
+  project chooses and publishes one;
 - `description`: plain-text description;
 - `publisher`: plain-text name plus optional URL and contact URL;
 - `created` and `updated`: ISO 8601 dates;
@@ -260,11 +304,14 @@ rendered.
 
 ### 7.2 Tile access
 
-`tiles` is a nonempty array of absolute URL templates. Equivalent endpoints
-may be listed for load distribution, but each must return the same content for
-the same logical tile.
+`tiles` is a nonempty array of absolute HTTP or HTTPS URL templates.
+Equivalent endpoints may be listed for load distribution, but each must
+return the same content for the same logical tile. Other URL schemes are
+invalid in version 1.
 
-Version 1 recognizes `{z}`, `{x}`, and `{y}`. It also accepts Mapper's current
+Version 1 recognizes `{z}`, `{x}`, and `{y}`. In the renderable dyadic profile,
+`{z}` is a decimal zoom number rather than an arbitrary OGC matrix identifier.
+The parser also accepts Mapper's current
 `${z}`, `${x}`, and `${y}` input spelling and canonicalizes it for comparison.
 The stored URL is not rewritten, which avoids changing signed or
 order-sensitive query strings.
@@ -283,7 +330,8 @@ Optional access members include:
 
 Version 1 request behavior is intentionally narrow:
 
-- `referer`: an absolute HTTP(S) URL;
+- `referer`: an absolute HTTP(S) URL containing no control characters,
+  including carriage return or line feed;
 - `emptyHttpStatusCodes`: a unique array of integer HTTP status codes; and
 - `emptyTileChecksums`: optional SHA-256 digests for known placeholder tiles.
 
@@ -301,12 +349,14 @@ A source contains exactly one of:
 - `tileMatrixSet`, containing an inline OGC 2D Tile Matrix Set 2.0 JSON object.
 
 Mapper initially guarantees the registered WebMercatorQuad definition and
-inline definitions. Referencing an unknown URI is an unsupported capability,
-not permission to assume Web Mercator.
+inline definitions that satisfy the `tile-matrix-set.dyadic.v1` profile.
+Referencing an unknown URI is an unsupported capability, not permission to
+assume Web Mercator.
 
 Inline validation checks:
 
-- a parseable CRS;
+- a version 1 CRS reference, limited to an `EPSG:<integer>` code or the
+  equivalent OGC CRS URI;
 - unique matrix identifiers;
 - finite positive cell sizes;
 - finite origins;
@@ -314,6 +364,29 @@ Inline validation checks:
 - consistent axis and origin semantics;
 - limits within the corresponding matrix dimensions; and
 - an unambiguous ordering for `minTileMatrix` and `maxTileMatrix`.
+
+The dyadic rendering profile additionally requires:
+
+- decimal integer matrix identifiers that start at zero, form a contiguous
+  sequence, and are the values substituted for `{z}`;
+- constant tile width and height across the usable sequence;
+- one common origin, origin corner, axis order, and row orientation;
+- square pixels;
+- each successively finer matrix to have half the preceding cell size, within
+  a documented floating-point tolerance;
+- each successively finer full matrix width and height to be twice the
+  preceding values; and
+- no variable-width tile matrices.
+
+`tileMatrixLimits` may restrict the available portion of each full matrix and
+need not itself double exactly. Base matrix dimensions may be greater than one,
+which permits regional ArcGIS caches such as Pierce County.
+
+An inline object can be valid OGC JSON while failing this renderer profile.
+Such a source is retained but disabled as requiring a future
+`tile-matrix-set.nondyadic.v1` capability. It does not proceed to GDAL and does
+not fail later while a user is adding a template. The unsupported fixture set
+contains a syntactically valid non-dyadic pyramid to pin this boundary.
 
 The Pierce County test source uses an inline EPSG:2927 matrix set with origin
 `890000, 967000`, 256-by-256 tiles, and the service's explicit levels. It must
@@ -443,6 +516,9 @@ individual features that may be implemented at different times.
 Initial capability identifiers are:
 
 - `tile-matrix-set.ogc-2.0`;
+- `tile-matrix-set.dyadic.v1`;
+- `tile-matrix-set.nondyadic.v1` (reserved; unsupported by the first
+  renderer);
 - `registration.translation2d.v1`;
 - `registration.affine2d.v1`; and
 - `registration.grid-shift.v1`.
@@ -450,6 +526,11 @@ Initial capability identifiers are:
 Unknown catalog-level required capabilities abort import. Unknown or
 unsupported source-level required capabilities retain the catalog but disable
 that source with a clear explanation.
+
+The reader derives required rendering capabilities from source content as
+well as checking an explicit `requires` array. An author cannot omit
+`tile-matrix-set.nondyadic.v1` and thereby make a non-dyadic matrix set appear
+renderable.
 
 Registration operations are inherently required for any source that declares
 them. A catalog author cannot mark a registration correction optional.
@@ -559,24 +640,46 @@ Catalogs are untrusted data. They are never executable configuration.
 - Large-catalog source warning threshold: 100.
 - Maximum redirects: 5.
 - Redirects may not switch to `file:` or another non-HTTP scheme.
+- Scheme, user information, resolved destination class, and byte limits are
+  revalidated before every redirect hop. A public catalog URL may not silently
+  redirect to a loopback, link-local, or private address; the fetch stops and
+  reports the destination. A user who intends to load that private catalog can
+  enter its final URL explicitly and accept the normal private-host warning.
 - Bounded connection and total request timeouts.
 - Content-Length is checked when present, and streaming is stopped at the
   hard byte limit when absent or inaccurate.
 
 ### 11.2 Parser and semantic limits
 
-- Bounded nesting depth and string/URL lengths.
+- Maximum nesting depth: 64.
+- Bounded string and URL lengths.
+- Maximum tile URL templates per source: 8.
+- Maximum tile matrices per matrix set: 64.
+- Maximum vertices across one coverage geometry: 10,000.
+- Maximum empty-tile HTTP codes or checksums per source: 32 each.
 - Duplicate catalog or source IDs are invalid.
 - Nonfinite numeric values are invalid.
 - URL templates must contain exactly the placeholders required by their
   declared source type.
 - Tile sizes, matrix sizes, levels, and limits must be internally consistent.
-- CRS definitions must parse through Mapper's PROJ integration.
+- CRS references are restricted to EPSG codes and equivalent OGC CRS URIs and
+  must parse through Mapper's PROJ integration. Version 1 does not accept
+  catalog-supplied PROJ strings, pipelines, WKT, or PROJJSON.
 - Translation and affine operations must be reversible.
 - Resource references must be declared and checksummed.
 - Unsupported required semantics are never ignored.
 
-### 11.3 Network and privacy behavior
+Catalog validation does not alter Mapper's process-wide PROJ network policy.
+If a user or packager has enabled PROJ network access, ordinary EPSG
+transformations may follow that existing policy; the catalog format itself
+cannot name a grid URL or introduce an arbitrary PROJ pipeline.
+
+Every catalog-derived value written into GDAL XML is XML-escaped, including
+server URLs, projection identifiers, referer values, formats, and future textual
+fields. The builder follows its existing `toHtmlEscaped()` practice rather
+than interpolating catalog strings directly.
+
+### 11.3 Network behavior and privacy boundary
 
 The preview lists all source hostnames. HTTP, loopback, link-local, and private
 network destinations are allowed only with a warning; they are legitimate for
@@ -584,6 +687,17 @@ club-hosted services and therefore cannot be rejected categorically.
 
 Import does not contact source hosts. Selecting and adding a source causes the
 same tile traffic that a manually entered source causes today.
+
+The import preview is the one host disclosure and confirmation point. Mapper
+does not warn again every time an intentionally installed source is selected.
+The host list is informational, not a phishing or publisher-authentication
+mechanism.
+
+Once used, a source operator can observe tile requests and infer the requested
+area, and can return imagery different from what the catalog author expected.
+Preventing those behaviors is outside the version 1 threat model. HTTPS still
+provides ordinary transport integrity and is tested as a functional release
+requirement.
 
 Catalog strings are displayed as plain text. URLs shown as links are validated
 and opened only after the normal explicit user action.
@@ -621,12 +735,24 @@ The same URL with a different grid, request behavior, or registration is not
 a duplicate.
 
 Canonical comparison normalizes recognized placeholder spelling, scheme and
-host case, and default ports. It does not reorder query parameters or rewrite
-the URL stored by the catalog.
+host case, the host's ASCII/ACE representation, and default ports. It does not
+normalize path/query percent encodings, reorder query parameters, or rewrite
+the URL stored by the catalog. Duplicate detection is a convenience and update
+aid, not a trust or security boundary; conservative normalization may report
+two equivalent spellings separately rather than risk changing request
+semantics.
 
 The generated imagery XML filename currently hashes the URL. It must instead
 hash the operational fingerprint so two corrected uses of the same endpoint
-cannot collide.
+cannot collide. The shortened digest is widened from 6 to at least 12
+hexadecimal characters while this identity is being changed.
+
+Generated-file identity and tile-cache identity are intentionally different.
+Registration belongs in the generated filename because it changes
+georeferencing. It does not change the bytes returned for a nominal tile
+request. The builder continues to emit GDAL's default `<Cache />` without a
+registration-specific path; two registrations of the same endpoint may share
+the normal request cache rather than downloading the same tiles twice.
 
 ## 13. Persistence
 
@@ -673,26 +799,37 @@ resolved runtime source:
 The catalog reader never emits GDAL XML directly. A resolver validates a
 definition against application capabilities and constructs a runtime source.
 
-### 14.2 Generic grid generation
+### 14.2 Generic dyadic grid generation
 
 Replace the Web-Mercator-specific builder path with:
 
 1. convert the selected map extent to geographic coordinates using the map's
    current georeferencing;
-2. project the extent into the source tile matrix CRS using `ProjTransform`;
-3. apply the inverse registration when determining which nominal source tiles
+2. select the highest permitted matrix in the validated dyadic sequence;
+3. project the extent into the source/target frame using `ProjTransform`;
+4. apply the inverse registration when determining which nominal source tiles
    are required;
-4. select the highest permitted tile matrix for the initial template;
 5. snap the extent to that matrix's origin, cell size, tile dimensions, and
    matrix limits; and
-6. emit the GDAL WMS data window, projection, request values, and cache entry.
+6. emit an XML-escaped GDAL WMS/TMS data window, projection, request values,
+   explicit `TileLevel`/`OverviewCount` corresponding to the source's maximum
+   and minimum usable zooms, and the normal default cache element.
 
-Extent conversion samples more than two corners when the source projection is
-nonlinear over the selected area. At minimum, corners and edge midpoints are
-used, with failure if projection produces no finite bounding box.
+For the dyadic TMS mini-driver, `TileLevel` is the maximum usable decimal zoom
+and `OverviewCount` is `maxTileMatrix - minTileMatrix`. This prevents GDAL from
+inventing requests below the source's declared minimum while keeping `{z}`
+aligned with the catalog's matrix identifiers.
+
+Extent conversion adaptively subdivides each boundary edge when the source
+projection is nonlinear. Subdivision continues until the projected midpoint
+deviates from its projected chord by no more than one quarter of a source
+pixel at the selected matrix, subject to a bounded recursion/sample limit.
+Conversion fails rather than underestimating coverage if no finite bounding
+box meeting the tolerance can be produced.
 
 The existing global Web Mercator math remains covered by regression tests but
 becomes a standard matrix-set instance rather than a hardcoded special case.
+Sources requiring a non-dyadic capability do not reach this builder path.
 
 ### 14.3 Registration rendering
 
@@ -725,29 +862,43 @@ src/gui/widgets/
   online_template_dialog.h/.cpp
 
 test/data/imagery-catalogs/
-  puget-sound-example.oom-imagery.json
+  valid/
+    custom-dyadic-epsg2927.oom-imagery.json
   invalid/
+  unsupported/
+    non-dyadic-matrix-set.oom-imagery.json
 
 doc/
   imagery-source-catalog.schema.json
   imagery-source-catalog.md
 ```
 
-No new third-party parser or networking dependency is required. Qt Core JSON,
-Qt Network, `QStandardPaths`, and `QSaveFile` cover the implementation and are
-already available in supported Mapper builds.
+No new third-party runtime parser or networking dependency is required. Qt
+Core JSON, Qt Network, `QStandardPaths`, and `QSaveFile` cover the application
+implementation and are already available in supported Mapper builds. A pinned
+schema validator is a CI/development tool only; the C++ validator remains
+normative.
 
 ## 16. Example and test catalog
 
-The first fixture is derived from sources already used by local Mapper
-installations:
+The first source definitions are derived from sources already used by local
+Mapper installations:
 
 - King County Aerial 2023;
 - King County Aerial 2025; and
 - Pierce County imagery through its cached ArcGIS endpoint.
 
-The fixture captures only source configuration and service metadata needed to
-exercise the parser and builder. Automated tests never contact county servers.
+The upstream-candidate automated fixture copies the relevant numeric geometry
+and request behavior but uses neutral names and `example.test` URLs. It
+captures only the configuration needed to exercise the parser and builder and
+never contacts county servers. This keeps provider policy and regional product
+choices out of the upstream core tests.
+
+A separate fork-level Puget Sound example catalog may contain the actual King
+and Pierce definitions for manual/release testing after a source-policy review.
+That is the compact real-world example requested for COC installations, but it
+is not required for upstream acceptance and is not contacted by automated
+tests.
 
 The cases intentionally cover:
 
@@ -760,38 +911,56 @@ The cases intentionally cover:
 - two different source definitions sharing broadly similar ArcGIS URL
   structure.
 
+An additional unsupported fixture is valid OGC JSON but deliberately
+non-dyadic. It verifies that the catalog installs with that source disabled and
+that no GDAL XML is generated for it.
+
 The test fixture is not automatically a production bundled-source decision.
 Bundled-source inclusion receives a separate review of reliability,
 attribution, terms, and product policy.
 
 ## 17. Test plan
 
-### 17.1 Parser and schema tests
+### 17.1 C++ parser and validator tests
 
 - minimal valid catalog;
 - complete catalog round trip without rewriting the installed snapshot;
 - wrong format and unsupported document version;
 - duplicate IDs and invalid revisions;
 - invalid URL templates and forbidden URL/header forms;
-- size, count, nesting, and string limits;
+- size, source count, nesting, string, URL mirror, matrix, checksum, and
+  coverage-vertex limits;
 - unknown catalog- and source-level capabilities;
 - strict unknown-field and namespaced-extension behavior; and
 - invalid, singular, or nonfinite registration parameters.
 
-### 17.2 Tile matrix and builder tests
+### 17.2 Informative schema tests
+
+- every structurally valid fixture passes the pinned JSON Schema validator;
+- every fixture invalid for a schema-expressible reason fails it;
+- unsupported-but-well-formed fixtures pass structural schema validation; and
+- C++ semantic tests separately cover CRS resolution, dyadic rendering,
+  cross-field consistency, and numerical invertibility.
+
+### 17.3 Tile matrix and builder tests
 
 - current Web Mercator coordinate and snapping regression cases;
-- King County WebMercatorQuad XML generation;
-- Pierce County EPSG:2927 origin, level, tile index, projection, referer, and
-  empty-code generation;
+- a synthetic WebMercatorQuad XML generation case matching the King County
+  geometry;
+- a synthetic EPSG:2927 origin, level, tile index, projection, referer, and
+  empty-code case matching the Pierce County geometry;
+- a valid non-dyadic OGC matrix set rejected as unsupported by the renderer;
+- dyadic tolerance, noncontiguous level, varying tile size, origin, and matrix
+  growth failures;
 - map extents crossing tile and matrix boundaries;
 - CRS conversion failures and partially nonfinite projected extents;
 - translation correction request indexes versus corrected output coordinates;
-  and
+- XML escaping and referer control-character rejection;
 - output filename differences when grid or registration differs for the same
-  URL.
+  URL; and
+- registration differences do not create a custom GDAL cache path.
 
-### 17.3 Store and identity tests
+### 17.4 Store and identity tests
 
 - exact reimport no-op;
 - higher-revision update and removed-source reporting;
@@ -802,19 +971,19 @@ attribution, terms, and product policy.
 - removal without touching generated templates; and
 - safe paths for malicious or unusual catalog IDs.
 
-### 17.4 Network import tests
+### 17.5 Network import tests
 
-Use a local deterministic HTTP server to cover:
+Use local deterministic HTTP and test-TLS servers to cover:
 
-- successful HTTPS-equivalent response handling;
-- redirects and redirect limits;
+- successful HTTP and TLS response handling;
+- redirects, redirect limits, and per-hop scheme/address revalidation;
 - Content-Length and streaming hard limits;
 - timeout and partial response;
 - ETag and Last-Modified persistence;
 - HTTP/private-host warnings; and
 - rejection of redirects to non-HTTP schemes.
 
-### 17.5 UI and release checks
+### 17.6 UI and release checks
 
 - chooser grouping, disabled headings, and action rows;
 - catalog selection does not enter manual recents;
@@ -822,23 +991,48 @@ Use a local deterministic HTTP server to cover:
 - import summary counts and large-catalog confirmation;
 - unsupported registered sources are disabled with an explanation;
 - catalog persistence after restart; and
-- Windows installed-build smoke: import local fixture, select King and Pierce,
-  add templates, restart, remove catalog, and verify existing templates remain.
+- Windows installed-build smoke: import a local fixture, import a small catalog
+  from a real public HTTPS URL using `QNetworkAccessManager`, select the fork's
+  King and Pierce examples, add templates, restart, remove the catalog, and
+  verify existing templates remain. The existing GDAL tile TLS smoke remains
+  separate because catalog import and imagery tiles use different network
+  stacks.
 
-## 18. Implementation sequence
+## 18. Upstream and implementation sequence
+
+### 18.1 Upstream boundary
+
+The format, C++ reader/validator, synthetic fixtures, dyadic renderer, catalog
+store, and generic dialogs are upstream-candidate work. They must remain free
+of COC branding, provider allowlists, club-specific paths, and release-channel
+assumptions. UI strings use Qt translation facilities, and the existing manual
+URL workflow remains available.
+
+Catalog/rendering code remains conditional on Mapper's existing GDAL feature
+boundary. The implementation should not make GDAL or online access mandatory
+for otherwise supported Mapper builds.
+
+The real Puget Sound catalog, the choice of which sources COC ships, and COC
+installer/release smoke automation are fork integration. Keep those in
+separate commits from the upstream-candidate core so they can be changed or
+dropped without rewriting the format implementation. A product source policy
+is not encoded in the interchange schema.
+
+### 18.2 Commit sequence
 
 Implementation should be reviewable as focused commits:
 
-1. **Format and model**: JSON Schema, catalog/source models, reader,
-   validation, fingerprints, and fixtures.
-2. **Generic tiling**: standard/inline matrix sets, source-CRS extent
+1. **Format and model**: informative JSON Schema, catalog/source models,
+   normative C++ validation, fingerprints, and synthetic valid/invalid/
+   unsupported fixtures.
+2. **Generic tiling**: standard/inline dyadic matrix sets, source-CRS extent
    conversion, generic snapping, request options, and translation correction.
 3. **Catalog store**: app-data snapshots, atomic update/removal, revision and
    duplicate analysis.
 4. **Import and chooser UI**: file/URL load, preview, grouping, source handles,
    and minimal installed-catalog management.
-5. **Bundled catalog and release QA**: move approved hardcoded presets into a
-   read-only resource catalog, package the assets, and perform installer smoke
+5. **Fork catalog and release QA**: build the separately reviewed COC catalog,
+   package approved assets, and perform local plus real-HTTPS installer smoke
    testing.
 
 The work should not alter unrelated build, packaging, template, or map-file
@@ -852,9 +1046,12 @@ The feature is ready for the first user when all of the following hold:
 - a catalog imports from a local file and an HTTPS URL;
 - the preview accurately reports sources, hostnames, duplicates, errors, and
   unsupported capabilities;
-- the Puget Sound fixture installs with three selectable sources;
+- the fork's Puget Sound example catalog installs with three selectable
+  sources;
 - King sources generate Web Mercator templates and Pierce generates its
   EPSG:2927 template with correct request behavior;
+- a syntactically valid non-dyadic source is retained but disabled before it
+  reaches GDAL;
 - a translation registration changes output georeferencing without changing
   nominal tile requests;
 - restart preserves the installed catalog;
@@ -865,21 +1062,26 @@ The feature is ready for the first user when all of the following hold:
   changes;
 - affine/grid registered sources can be installed but cannot be selected by a
   build that cannot apply them; and
-- the Windows installed-build smoke test passes without requiring development
-  files or network access to import the local fixture.
+- the Windows installed-build smoke test passes for both local import and one
+  real public HTTPS catalog import, while automated source tests remain
+  independent of county-server availability.
 
 ## 20. Review decisions requested
 
 Review should explicitly confirm or change:
 
-1. the custom JSON wrapper plus embedded OGC tile matrix set approach;
-2. `.oom-imagery.json` and the proposed media type;
-3. strict fields plus namespaced extensions rather than permissive unknown
-   keys;
+1. the custom JSON wrapper plus embedded OGC tile matrix set approach, with a
+   dyadic first-renderer profile and capability-gated non-dyadic sets;
+2. `.oom-imagery.json` and the unregistered, non-dispatching media type hint;
+3. a normative C++ validator, informative CI-checked JSON Schema, strict
+   fields, and namespaced extensions;
 4. the distinction between a tile matrix set and a surveyed registration;
 5. translation support in the first implementation with affine/grid
    capability-gated;
 6. snapshot installation with no automatic refresh;
 7. the 1 MiB/100-source warning and 10 MiB/1,000-source hard limits; and
-8. keeping the Puget Sound fixture separate from the product's approved
-   bundled catalog.
+8. keeping synthetic upstream fixtures, the real Puget Sound example, and the
+   product's approved bundled catalog as separate concerns;
+9. the high-consequence-only version 1 threat model; and
+10. the split between upstream-candidate implementation commits and
+    COC-specific catalog/release integration.
