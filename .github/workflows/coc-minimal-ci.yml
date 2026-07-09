@@ -91,7 +91,8 @@ jobs:
         run: |
           export PATH="$(brew --prefix qt@5)/bin:$PATH"
           rm -rf "$DIST_DIR"
-          cmake --install "$BUILD_DIR" --prefix "$DIST_DIR" --strip
+          dist_prefix="$(pwd)/$DIST_DIR"
+          cmake --install "$BUILD_DIR" --prefix "$dist_prefix" --strip
 
       - name: Validate staged app bundle
         run: |
