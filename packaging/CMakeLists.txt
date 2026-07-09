@@ -311,6 +311,17 @@ if(Mapper_PACKAGE_GDAL)
 	install(
 	  DIRECTORY "${GDAL_DATA_DIR}/"
 	  DESTINATION "${MAPPER_DATA_DESTINATION}/gdal")
+	set(Mapper_PACKAGE_CA_BUNDLE "" CACHE FILEPATH
+	  "CA certificate bundle to package for GDAL's curl-based drivers")
+	if(Mapper_PACKAGE_CA_BUNDLE)
+		if(NOT EXISTS "${Mapper_PACKAGE_CA_BUNDLE}")
+			message(SEND_ERROR "Mapper_PACKAGE_CA_BUNDLE does not exist: ${Mapper_PACKAGE_CA_BUNDLE}")
+		endif()
+		install(
+		  FILES "${Mapper_PACKAGE_CA_BUNDLE}"
+		  DESTINATION "${MAPPER_DATA_DESTINATION}/gdal"
+		  RENAME curl-ca-bundle.crt)
+	endif()
 	foreach(item IN LISTS GDAL_LIBRARIES)
 		if(EXISTS "${item}")
 			get_filename_component(GDAL_LIBRARY_DIR "${item}" PATH)

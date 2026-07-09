@@ -188,7 +188,7 @@ jobs:
     env:
       BUILD_DIR: build/windows-portable
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
-      VERSION_DISPLAY: 0.9.7-COC.1
+      VERSION_DISPLAY: 0.9.7-COC.2
       GDAL_VERSION: 3.11.5
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
@@ -218,6 +218,7 @@ jobs:
             mingw-w64-x86_64-proj
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-curl
+            mingw-w64-x86_64-ca-certificates
             mingw-w64-x86_64-libtiff
             mingw-w64-x86_64-libgeotiff
             mingw-w64-x86_64-libpng
@@ -340,6 +341,7 @@ jobs:
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF \
             -DMapper_VERSION_DISPLAY="$VERSION_DISPLAY" \
+            -DMapper_PACKAGE_CA_BUNDLE=/mingw64/etc/ssl/certs/ca-bundle.crt \
             -DGDAL_DATA_DIR=/mingw64/share/gdal \
             -DPROJ_DATA_DIR=/mingw64/share/proj
 
@@ -380,6 +382,7 @@ jobs:
           test -f "$DIST_DIR/Mapper.exe"
           test -f "$DIST_DIR/qt.conf"
           test -f "$DIST_DIR/gdal/gdalvrt.xsd"
+          test -f "$DIST_DIR/gdal/curl-ca-bundle.crt"
           test -f "$DIST_DIR/proj/proj.db"
           test -f "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
@@ -495,6 +498,7 @@ jobs:
           foreach ($requiredPath in @(
             "qt.conf",
             "gdal\gdalvrt.xsd",
+            "gdal\curl-ca-bundle.crt",
             "proj\proj.db"
           )) {
             if (-not (Test-Path (Join-Path $rootDir $requiredPath))) {
