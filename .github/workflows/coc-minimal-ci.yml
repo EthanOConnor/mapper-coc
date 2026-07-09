@@ -317,11 +317,111 @@ jobs:
           }
           Compress-Archive -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR) -DestinationPath $zipPath -CompressionLevel Optimal
 
+      - name: Create Windows installer
+        run: |
+          mkdir -p dist
+          cpack --config "$BUILD_DIR/CPackConfig.cmake" -G NSIS -B dist
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          installer="$(find dist -maxdepth 1 -type f -name '*.exe' | head -n 1)"
+          test -n "$installer"
+          target="dist/OpenOrienteering-Mapper-coc-minimal-windows-x64-installer-$short_sha.exe"
+          mv "$installer" "$target"
+          test -s "$target"
+
+      - name: Smoke test Windows installer
+        shell: powershell
+        run: |
+          $installer = Get-ChildItem `
+            -Path (Join-Path $env:GITHUB_WORKSPACE "dist") `
+            -Filter "OpenOrienteering-Mapper-coc-minimal-windows-x64-installer-*.exe" `
+            | Select-Object -First 1
+
+          if (-not $installer) {
+            throw "Installer artifact was not created."
+          }
+
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          Write-Host "Installer Authenticode status: $($signature.Status)"
+
+          $installRoot = Join-Path $env:RUNNER_TEMP "mapper-installer-smoke"
+          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $installRoot | Out-Null
+
+          $installProcess = Start-Process `
+            -FilePath $installer.FullName `
+            -ArgumentList @("/S", "/D=$installRoot") `
+            -PassThru
+
+          if (-not $installProcess.WaitForExit(60000)) {
+            Stop-Process -Id $installProcess.Id -Force
+            throw "Installer did not complete within 60 seconds."
+          }
+          if ($installProcess.ExitCode -ne 0) {
+            throw "Installer exited with code $($installProcess.ExitCode)."
+          }
+
+          $mapperExe = Get-ChildItem -Path $installRoot -Recurse -Filter Mapper.exe | Select-Object -First 1
+          if (-not $mapperExe) {
+            Get-ChildItem -Path $installRoot -Recurse | Select-Object -First 200 | Format-Table FullName
+            throw "Installed Mapper.exe was not found."
+          }
+
+          $rootDir = $mapperExe.Directory.FullName
+          foreach ($requiredPath in @(
+            "qt.conf",
+            "gdal\gdalvrt.xsd",
+            "proj\proj.db"
+          )) {
+            if (-not (Test-Path (Join-Path $rootDir $requiredPath))) {
+              throw "Installed tree is missing $requiredPath."
+            }
+          }
+          if (-not (Get-ChildItem -Path $rootDir -Filter "Qt5*.dll" | Select-Object -First 1)) {
+            throw "Installed tree is missing Qt runtime DLLs."
+          }
+
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "mapper-installed-startup.stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "mapper-installed-startup.stderr.txt"
+          Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+          $env:QT_DEBUG_PLUGINS = "1"
+          $env:QT_LOGGING_RULES = "qt.qpa.*=true"
+          $mapperProcess = Start-Process `
+            -FilePath $mapperExe.FullName `
+            -WorkingDirectory $rootDir `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+          if ($mapperProcess.WaitForExit(10000)) {
+            Write-Host "Installed Mapper.exe exited during startup smoke test with code $($mapperProcess.ExitCode)."
+            if (Test-Path $stdoutPath) {
+              Write-Host "--- Installed Mapper stdout ---"
+              Get-Content $stdoutPath
+            }
+            if (Test-Path $stderrPath) {
+              Write-Host "--- Installed Mapper stderr ---"
+              Get-Content $stderrPath
+            }
+            throw "Installed Mapper.exe failed startup smoke test."
+          }
+
+          Stop-Process -Id $mapperProcess.Id -Force
+
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v7
         with:
           name: coc-minimal-windows-x64-portable
           path: dist/OpenOrienteering-Mapper-coc-minimal-windows-x64-*.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-minimal-windows-x64-installer
+          path: dist/OpenOrienteering-Mapper-coc-minimal-windows-x64-installer-*.exe
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
