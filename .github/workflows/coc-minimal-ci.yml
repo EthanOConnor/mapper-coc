@@ -137,6 +137,7 @@ jobs:
       BUILD_DIR: build/windows-portable
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
       VERSION_DISPLAY: 0.9.7-COC.1
+      GDAL_VERSION: 3.11.5
     steps:
       - name: Configure checkout line endings
         shell: powershell
@@ -149,7 +150,9 @@ jobs:
         with:
           msystem: MINGW64
           path-type: minimal
-          update: true
+          # No full system upgrade: keeps runs deterministic and fast.
+          # Bump packages deliberately by clearing the msys2 cache.
+          update: false
           cache: true
           install: >-
             mingw-w64-x86_64-toolchain
@@ -177,11 +180,26 @@ jobs:
             mingw-w64-x86_64-nsis
             mingw-w64-x86_64-doxygen
 
+      # Key the GDAL cache on the exact MSYS2 package set so a package
+      # re-resolve (msys2 cache miss) invalidates cached GDAL binaries
+      # that were linked against older MSYS2 libraries.
+      - name: Record MSYS2 package versions
+        run: pacman -Q > .msys2-packages.txt
+
+      - name: Restore minimal GDAL install
+        id: gdal-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: gdal-stage
+          key: gdal-${{ env.GDAL_VERSION }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+
       - name: Build minimal GDAL
+        if: steps.gdal-cache.outputs.cache-hit != 'true'
         run: |
-          GDAL_VERSION=3.11.0
-          curl -fsSL "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz" \
-            | tar xz -C /tmp
+          curl -fsSLO "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz"
+          curl -fsSLO "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz.md5"
+          md5sum -c "gdal-${GDAL_VERSION}.tar.gz.md5"
+          tar xzf "gdal-${GDAL_VERSION}.tar.gz" -C /tmp
           cmake -S "/tmp/gdal-${GDAL_VERSION}" -B /tmp/gdal-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/mingw64 \
@@ -216,7 +234,27 @@ jobs:
             -DGDAL_USE_SPATIALITE=OFF \
             -DGDAL_USE_RASTERLITE2=OFF
           cmake --build /tmp/gdal-build --parallel 4
-          cmake --install /tmp/gdal-build
+          # DESTDIR is unreliable on Windows (drive-letter stripping);
+          # stage with an explicit install prefix instead.
+          cmake --install /tmp/gdal-build --prefix "$(pwd)/gdal-stage/mingw64"
+
+      # Save immediately so a failure later in the job (Mapper build,
+      # tests, packaging) does not discard the expensive GDAL build.
+      - name: Save minimal GDAL install
+        if: steps.gdal-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: gdal-stage
+          key: gdal-${{ env.GDAL_VERSION }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+
+      - name: Install minimal GDAL into MSYS2 prefix
+        run: |
+          test -d gdal-stage/mingw64 || {
+            echo "::error::gdal-stage/mingw64 missing - GDAL staging failed"
+            find gdal-stage -maxdepth 3 -type d 2>/dev/null | head -20
+            exit 1
+          }
+          cp -a gdal-stage/mingw64/. /mingw64/
 
       - name: Configure
         run: |
