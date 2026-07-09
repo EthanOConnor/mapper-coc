@@ -160,10 +160,21 @@ jobs:
           test -f "$app/Contents/Resources/gdal/gdalvrt.xsd"
           test -d "$app/Contents/Frameworks"
           otool -L "$app/Contents/MacOS/Mapper"
-          if otool -L "$app/Contents/MacOS/Mapper" | grep -E '/opt/homebrew/opt/(qt@5|gdal|proj)'; then
-            echo "Mapper still links to Homebrew Qt/GDAL/PROJ libraries"
-            exit 1
-          fi
+          # Check every Mach-O file in the bundle, not just the main
+          # executable: transitive Homebrew linkage (e.g. a bundled GDAL
+          # dylib still loading Homebrew openssl@3) breaks the app on
+          # machines without Homebrew, and the top-level check misses it.
+          violations=0
+          while IFS= read -r -d '' binary; do
+            file "$binary" | grep -q 'Mach-O' || continue
+            deps="$(otool -L "$binary" | tail -n +2 | grep -E '(/opt/homebrew|/usr/local)/' || true)"
+            if [ -n "$deps" ]; then
+              echo "::error::$binary links outside the bundle:"
+              echo "$deps"
+              violations=1
+            fi
+          done < <(find "$app" -type f -print0)
+          exit "$violations"
 
       - name: Create app ZIP
         run: |
@@ -217,8 +228,7 @@ jobs:
             mingw-w64-x86_64-gdb
             mingw-w64-x86_64-proj
             mingw-w64-x86_64-sqlite3
-            mingw-w64-x86_64-curl
-            mingw-w64-x86_64-ca-certificates
+            mingw-w64-x86_64-curl-winssl
             mingw-w64-x86_64-libtiff
             mingw-w64-x86_64-libgeotiff
             mingw-w64-x86_64-libpng
@@ -243,10 +253,16 @@ jobs:
       - name: Record MSYS2 package versions
         run: |
           pacman -Q > .msys2-packages.txt
-          # ca-certificates fills this file in a post-install scriptlet;
-          # pacman reports success even if that scriptlet fails, leaving
-          # a zero-byte bundle. Fail here, where it can be attributed.
-          test -s /mingw64/etc/ssl/certs/ca-bundle.crt
+          # The Schannel curl variant must be the one installed: it uses
+          # the Windows certificate store, so no CA bundle needs to be
+          # packaged. An OpenSSL-backed libcurl sneaking back in would
+          # silently reintroduce the white-tiles TLS failure (PR #13).
+          pacman -Q mingw-w64-x86_64-curl-winssl
+          if objdump -p /mingw64/bin/libcurl-4.dll | grep 'DLL Name' | grep -qiE 'libssl|libcrypto'; then
+            echo "::error::libcurl imports OpenSSL - expected Schannel (curl-winssl)"
+            objdump -p /mingw64/bin/libcurl-4.dll | grep 'DLL Name'
+            exit 1
+          fi
 
       - name: Restore minimal GDAL install
         id: gdal-cache
@@ -346,7 +362,6 @@ jobs:
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF \
             -DMapper_VERSION_DISPLAY="$VERSION_DISPLAY" \
-            -DMapper_PACKAGE_CA_BUNDLE=/mingw64/etc/ssl/certs/ca-bundle.crt \
             -DGDAL_DATA_DIR=/mingw64/share/gdal \
             -DPROJ_DATA_DIR=/mingw64/share/proj
 
@@ -388,8 +403,10 @@ jobs:
           test -f "$DIST_DIR/Mapper.exe"
           test -f "$DIST_DIR/qt.conf"
           test -f "$DIST_DIR/gdal/gdalvrt.xsd"
-          certs=$(grep -c -- '-----BEGIN CERTIFICATE-----' "$DIST_DIR/gdal/curl-ca-bundle.crt" || true)
-          test "$certs" -ge 100 || { echo "::error::CA bundle has only $certs certificates"; exit 1; }
+          # Schannel curl uses the Windows certificate store; no CA
+          # bundle may ship (a stale one would shadow the system store
+          # via the CURL_CA_BUNDLE default in gdal_manager.cpp).
+          test ! -f "$DIST_DIR/gdal/curl-ca-bundle.crt"
           test -f "$DIST_DIR/proj/proj.db"
           test -f "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
@@ -402,12 +419,13 @@ jobs:
           compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
 
       # Run from the packaged tree via PowerShell (not the MSYS2 shell) so
-      # the shipped DLLs and the shipped CA bundle are what get exercised.
+      # the shipped DLLs are what get exercised. With Schannel curl this
+      # verifies against the Windows certificate store — exactly what an
+      # end-user machine does.
       - name: Smoke test HTTPS certificate verification
         shell: powershell
         run: |
           $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
-          $env:CURL_CA_BUNDLE = Join-Path $rootDir "gdal\curl-ca-bundle.crt"
           $output = (& (Join-Path $rootDir "mapper-gdal-info.exe") --tls-check https://example.com/ 2>&1) -join "`n"
           Write-Host $output
           if ($LASTEXITCODE -ne 0 -or $output -notmatch "TLS: ok") {
@@ -518,16 +536,14 @@ jobs:
           foreach ($requiredPath in @(
             "qt.conf",
             "gdal\gdalvrt.xsd",
-            "gdal\curl-ca-bundle.crt",
             "proj\proj.db"
           )) {
             if (-not (Test-Path (Join-Path $rootDir $requiredPath))) {
               throw "Installed tree is missing $requiredPath."
             }
           }
-          $caCount = (Select-String -Path (Join-Path $rootDir "gdal\curl-ca-bundle.crt") -Pattern "BEGIN CERTIFICATE" -SimpleMatch).Count
-          if ($caCount -lt 100) {
-            throw "Installed CA bundle has only $caCount certificates."
+          if (Test-Path (Join-Path $rootDir "gdal\curl-ca-bundle.crt")) {
+            throw "Installed tree ships a CA bundle; Schannel curl must use the Windows certificate store."
           }
           if (-not (Get-ChildItem -Path $rootDir -Filter "Qt5*.dll" | Select-Object -First 1)) {
             throw "Installed tree is missing Qt runtime DLLs."
