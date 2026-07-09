@@ -4,6 +4,11 @@ on:
   push:
     branches: [coc/minimal]
   workflow_dispatch:
+    inputs:
+      build_android:
+        description: Build the Android APK (slow, ~70 min)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -430,7 +435,11 @@ jobs:
           compression-level: 0
 
   android:
-    runs-on: ubuntu-22.04
+    # Skipped on push until CI modernization (superbuild caching, disk
+    # management) — see https://github.com/EthanOConnor/mapper/pull/9.
+    # Run on demand via workflow_dispatch with build_android=true.
+    if: ${{ inputs.build_android }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
       BUILD_DIR: build/android-release
