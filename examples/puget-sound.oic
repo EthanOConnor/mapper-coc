@@ -2,7 +2,7 @@
   "format": "org.openorienteering.imagery-catalog",
   "version": 1,
   "id": "org.cascadeoc.mapper.imagery.puget-sound-example",
-  "revision": 1,
+  "revision": 2,
   "name": "Puget Sound imagery example",
   "description": "Real-world regional and global imagery sources for manual testing. This example is not installed as a Mapper preset.",
   "created": "2026-07-09",
