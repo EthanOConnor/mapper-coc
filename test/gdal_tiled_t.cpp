@@ -471,12 +471,21 @@ private slots:
 		                         1.7 * span);
 		auto const crop = OnlineImageryTemplateBuilder::snapToTileGrid(bbox, resolved.source);
 		QCOMPARE(crop.tile_level, 2);
-		QCOMPARE(crop.tile_x_min, 2);
+		QCOMPARE(crop.tile_x_min, 0);
 		QCOMPARE(crop.tile_x_max, 3);
-		QCOMPARE(crop.tile_y_min, 2);
+		QCOMPARE(crop.tile_y_min, 0);
 		QCOMPARE(crop.tile_y_max, 3);
-		QCOMPARE(crop.pixel_width, 512);
-		QCOMPARE(crop.pixel_height, 512);
+		QCOMPARE(crop.tile_x_min % 64, 0);
+		QCOMPARE(crop.tile_y_min % 64, 0);
+		QCOMPARE(crop.pixel_width, 1024);
+		QCOMPARE(crop.pixel_height, 1024);
+
+		Map map;
+		GdalTemplate generated(QStringLiteral("catalog.xml"), &map);
+		generated.tiled_raster_info.block_size = matrix.tile_size;
+		generated.has_tiled_origin_tile = true;
+		generated.tiled_origin_tile = QPoint(crop.tile_x_min, crop.tile_y_min);
+		QCOMPARE(generated.chooseTiledSubsampling(0.02), 64);
 	}
 
 	void tiledCoreMathTest()

@@ -19,6 +19,7 @@
 
 #include "online_imagery_template_builder.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 
@@ -533,10 +534,19 @@ OnlineImageryTemplateBuilder::snapToTileGrid(const QRectF& source_bbox, const On
 	auto y_max = top_origin
 	             ? qint64(std::ceil((matrix.point_of_origin.y() - bbox_south) / span_y)) - 1
 	             : qint64(std::ceil((bbox_north - matrix.point_of_origin.y()) / span_y)) - 1;
-	x_min = std::max(x_min, min_col); x_max = std::min(x_max, max_col);
-	y_min = std::max(y_min, min_row); y_max = std::min(y_max, max_row);
+	x_min = std::max({ x_min, min_col, qint64(0) });
+	x_max = std::min({ x_max, max_col, matrix.matrix_width - 1 });
+	y_min = std::max({ y_min, min_row, qint64(0) });
+	y_max = std::min({ y_max, max_row, matrix.matrix_height - 1 });
 	if (x_min > x_max || y_min > y_max)
 		return {};
+
+	// Keep the cropped origin aligned with GDAL's power-of-two TMS overviews.
+	// Padding may cross tile matrix limits: missing tiles are transparent, and
+	// preserving overview alignment is more important than a tight crop there.
+	constexpr qint64 origin_alignment = 64;
+	x_min -= x_min % origin_alignment;
+	y_min -= y_min % origin_alignment;
 	crop.tile_x_min = int(x_min); crop.tile_x_max = int(x_max);
 	crop.tile_y_min = int(y_min); crop.tile_y_max = int(y_max);
 	crop.west = matrix.point_of_origin.x() + x_min * span_x;
