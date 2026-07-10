@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/examples">
+        <file>complete map.omap</file>
+        <file>forest sample.omap</file>
+    </qresource>
+</RCC>

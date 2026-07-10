@@ -1,0 +1,725 @@
+name: COC Minimal CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_android:
+        description: Build the Android APK (slow, ~70 min)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUILD_DIR: build/linux
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ ccache \
+            libgdal-dev libproj-dev libpolyclipping-dev libcups2-dev \
+            qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
+            libqt5sensors5-dev libqt5serialport5-dev libqt5network5 \
+            qt5-image-formats-plugins doxygen
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+
+      - name: Zero compiler cache statistics
+        run: ccache -z
+
+      - name: Configure
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache -s
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$(nproc)"
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      BUILD_DIR: build/macos
+      DIST_DIR: dist/macos-arm64
+      APP_ZIP: coc-minimal-macos-arm64-app.zip
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: brew install cmake ninja ccache gdal proj qt@5 doxygen
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ccache-macos-${{ github.sha }}
+          restore-keys: ccache-macos-
+
+      - name: Zero compiler cache statistics
+        run: ccache -z
+
+      - name: Configure
+        run: |
+          export PATH="$(brew --prefix qt@5)/bin:$PATH"
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_PACKAGE_QT=ON \
+            -DMapper_PACKAGE_PROJ=ON \
+            -DMapper_PACKAGE_GDAL=ON \
+            -DMapper_PACKAGE_ASSISTANT=OFF \
+            -DMapper_PACKAGE_EXTRA_LIBRARY_DIRS="$(brew --prefix)/lib" \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF \
+            -DGDAL_DATA_DIR="$(brew --prefix gdal)/share/gdal" \
+            -DPROJ_DATA_DIR="$(brew --prefix proj)/share/proj"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel "$(sysctl -n hw.logicalcpu)"
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache -s
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-macos-${{ github.sha }}
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$(sysctl -n hw.logicalcpu)"
+
+      - name: Stage app bundle
+        run: |
+          export PATH="$(brew --prefix qt@5)/bin:$PATH"
+          rm -rf "$DIST_DIR"
+          dist_prefix="$(pwd)/$DIST_DIR"
+          cmake --install "$BUILD_DIR" --prefix "$dist_prefix" --strip
+
+      - name: Validate staged app bundle
+        run: |
+          app="$DIST_DIR/Mapper.app"
+          test -x "$app/Contents/MacOS/Mapper"
+          test -f "$app/Contents/Resources/qt.conf"
+          test -f "$app/Contents/Resources/proj/proj.db"
+          test -f "$app/Contents/Resources/gdal/gdalvrt.xsd"
+          test -d "$app/Contents/Frameworks"
+          otool -L "$app/Contents/MacOS/Mapper"
+          # Check every Mach-O file in the bundle, not just the main
+          # executable: transitive Homebrew linkage (e.g. a bundled GDAL
+          # dylib still loading Homebrew openssl@3) breaks the app on
+          # machines without Homebrew, and the top-level check misses it.
+          violations=0
+          while IFS= read -r -d '' binary; do
+            file "$binary" | grep -q 'Mach-O' || continue
+            deps="$(otool -L "$binary" | tail -n +2 | grep -E '(/opt/homebrew|/usr/local)/' || true)"
+            if [ -n "$deps" ]; then
+              echo "::error::$binary links outside the bundle:"
+              echo "$deps"
+              violations=1
+            fi
+          done < <(find "$app" -type f -print0)
+          exit "$violations"
+
+      - name: Create app ZIP
+        run: |
+          ditto -c -k --keepParent "$DIST_DIR/Mapper.app" "$DIST_DIR/$APP_ZIP"
+          unzip -l "$DIST_DIR/$APP_ZIP" | grep -q '^.*Mapper.app/Contents/MacOS/Mapper$'
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-minimal-macos-arm64-app
+          path: dist/macos-arm64/coc-minimal-macos-arm64-app.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      BUILD_DIR: build/windows-portable
+      DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
+      VERSION_DISPLAY: 0.9.7-COC.5
+      GDAL_VERSION: 3.11.5
+      # Bump whenever the "Build minimal GDAL" recipe changes (driver
+      # list, CMake flags): the cache key does not see the recipe, so
+      # without a bump a stale GDAL build would be reused.
+      GDAL_RECIPE_REV: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - name: Configure checkout line endings
+        shell: powershell
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v6
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: minimal
+          # No full system upgrade: keeps runs deterministic and fast.
+          # Bump packages deliberately by clearing the msys2 cache.
+          update: false
+          cache: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+            mingw-w64-x86_64-gdb
+            mingw-w64-x86_64-proj
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-curl-winssl
+            mingw-w64-x86_64-libtiff
+            mingw-w64-x86_64-libgeotiff
+            mingw-w64-x86_64-libpng
+            mingw-w64-x86_64-libjpeg-turbo
+            mingw-w64-x86_64-expat
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-xz
+            mingw-w64-x86_64-qt5-base
+            mingw-w64-x86_64-qt5-imageformats
+            mingw-w64-x86_64-qt5-location
+            mingw-w64-x86_64-qt5-sensors
+            mingw-w64-x86_64-qt5-serialport
+            mingw-w64-x86_64-qt5-tools
+            mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-nsis
+            mingw-w64-x86_64-doxygen
+
+      # Key the GDAL cache on the exact MSYS2 package set so a package
+      # re-resolve (msys2 cache miss) invalidates cached GDAL binaries
+      # that were linked against older MSYS2 libraries.
+      - name: Record MSYS2 package versions
+        run: |
+          pacman -Q > .msys2-packages.txt
+          # The Schannel curl variant must be the one installed: it uses
+          # the Windows certificate store, so no CA bundle needs to be
+          # packaged. An OpenSSL-backed libcurl sneaking back in would
+          # silently reintroduce the white-tiles TLS failure (PR #13).
+          pacman -Q mingw-w64-x86_64-curl-winssl
+          if objdump -p /mingw64/bin/libcurl-4.dll | grep 'DLL Name' | grep -qiE 'libssl|libcrypto'; then
+            echo "::error::libcurl imports OpenSSL - expected Schannel (curl-winssl)"
+            objdump -p /mingw64/bin/libcurl-4.dll | grep 'DLL Name'
+            exit 1
+          fi
+
+      - name: Restore minimal GDAL install
+        id: gdal-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: gdal-stage
+          key: gdal-${{ env.GDAL_VERSION }}-r${{ env.GDAL_RECIPE_REV }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
+          restore-keys: ccache-windows-
+
+      - name: Zero compiler cache statistics
+        run: ccache -z
+
+      - name: Build minimal GDAL
+        if: steps.gdal-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSLO "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz"
+          curl -fsSLO "https://github.com/OSGeo/gdal/releases/download/v${GDAL_VERSION}/gdal-${GDAL_VERSION}.tar.gz.md5"
+          md5sum -c "gdal-${GDAL_VERSION}.tar.gz.md5"
+          tar xzf "gdal-${GDAL_VERSION}.tar.gz" -C /tmp
+          cmake -S "/tmp/gdal-${GDAL_VERSION}" -B /tmp/gdal-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/mingw64 \
+            -DBUILD_APPS=OFF \
+            -DBUILD_TESTING=OFF \
+            -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF \
+            -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+            -DGDAL_USE_SQLITE3=ON \
+            -DOGR_ENABLE_DRIVER_GPX=ON \
+            -DOGR_ENABLE_DRIVER_GPKG=ON \
+            -DOGR_ENABLE_DRIVER_MVT=ON \
+            -DOGR_ENABLE_DRIVER_OSM=ON \
+            -DOGR_ENABLE_DRIVER_SQLITE=ON \
+            -DOGR_ENABLE_DRIVER_KML=ON \
+            -DOGR_ENABLE_DRIVER_DXF=ON \
+            -DGDAL_ENABLE_DRIVER_MBTILES=ON \
+            -DGDAL_ENABLE_DRIVER_WMS=ON \
+            -DGDAL_ENABLE_DRIVER_GTIFF=ON \
+            -DGDAL_ENABLE_DRIVER_RAW=ON \
+            -DGDAL_ENABLE_DRIVER_PNG=ON \
+            -DGDAL_ENABLE_DRIVER_JPEG=ON \
+            -DGDAL_USE_ARROW=OFF \
+            -DGDAL_USE_PARQUET=OFF \
+            -DGDAL_USE_HDF5=OFF \
+            -DGDAL_USE_NETCDF=OFF \
+            -DGDAL_USE_POPPLER=OFF \
+            -DGDAL_USE_SFCGAL=OFF \
+            -DGDAL_USE_HEIF=OFF \
+            -DGDAL_USE_JXL=OFF \
+            -DGDAL_USE_LIBKML=OFF \
+            -DGDAL_USE_OPENJPEG=OFF \
+            -DGDAL_USE_SPATIALITE=OFF \
+            -DGDAL_USE_RASTERLITE2=OFF
+          cmake --build /tmp/gdal-build --parallel 4
+          # DESTDIR is unreliable on Windows (drive-letter stripping);
+          # stage with an explicit install prefix instead.
+          cmake --install /tmp/gdal-build --prefix "$(pwd)/gdal-stage/mingw64"
+
+      # Save immediately so a failure later in the job (Mapper build,
+      # tests, packaging) does not discard the expensive GDAL build.
+      - name: Save minimal GDAL install
+        if: steps.gdal-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: gdal-stage
+          key: gdal-${{ env.GDAL_VERSION }}-r${{ env.GDAL_RECIPE_REV }}-mingw64-${{ hashFiles('.msys2-packages.txt') }}
+
+      - name: Install minimal GDAL into MSYS2 prefix
+        run: |
+          test -d gdal-stage/mingw64 || {
+            echo "::error::gdal-stage/mingw64 missing - GDAL staging failed"
+            find gdal-stage -maxdepth 3 -type d 2>/dev/null | head -20
+            exit 1
+          }
+          cp -a gdal-stage/mingw64/. /mingw64/
+
+      - name: Configure
+        run: |
+          rm -rf "$BUILD_DIR" "$DIST_DIR"
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DBUILD_TESTING=ON \
+            -DMapper_AUTORUN_SYSTEM_TESTS=OFF \
+            -DMapper_AUTORUN_MANUAL_TESTS=OFF \
+            -DMapper_USE_GDAL=ON \
+            -DMapper_PACKAGE_QT=ON \
+            -DMapper_PACKAGE_PROJ=ON \
+            -DMapper_PACKAGE_GDAL=ON \
+            -DMapper_PACKAGE_ASSISTANT=OFF \
+            -DMapper_PACKAGE_FILE_ASSOCIATIONS=OFF \
+            -DMapper_MANUAL_QTHELP=OFF \
+            -DMapper_MANUAL_PDF=OFF \
+            -DMapper_VERSION_DISPLAY="$VERSION_DISPLAY" \
+            -DGDAL_DATA_DIR=/mingw64/share/gdal \
+            -DPROJ_DATA_DIR=/mingw64/share/proj
+          grep -q '^Mapper_PACKAGE_FILE_ASSOCIATIONS:BOOL=OFF$' "$BUILD_DIR/CMakeCache.txt"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR" --parallel 4
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache -s
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
+
+      - name: Test
+        env:
+          GDAL_DATA: /mingw64/share/gdal
+          PROJ_DATA: /mingw64/share/proj
+        run: |
+          test_tmp="$(pwd)/$BUILD_DIR/tmp"
+          mkdir -p "$test_tmp"
+          export TMPDIR="$test_tmp"
+          export TEMP="$(cygpath -w "$test_tmp")"
+          export TMP="$TEMP"
+          ctest --test-dir "$BUILD_DIR" --output-on-failure
+
+      - name: Stage portable install tree
+        run: |
+          dist_prefix="$(pwd)/$DIST_DIR"
+          cmake --install "$BUILD_DIR" --prefix "$dist_prefix"
+          "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" > "$DIST_DIR/mapper-gdal-info.txt"
+          cp "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" "$DIST_DIR/"
+
+      - name: Validate staged install tree
+        run: |
+          test -f "$DIST_DIR/Mapper.exe"
+          test -f "$DIST_DIR/qt.conf"
+          test -f "$DIST_DIR/gdal/gdalvrt.xsd"
+          # Schannel curl uses the Windows certificate store; no CA
+          # bundle may ship (a stale one would shadow the system store
+          # via the CURL_CA_BUNDLE default in gdal_manager.cpp).
+          test ! -f "$DIST_DIR/gdal/curl-ca-bundle.crt"
+          test -f "$DIST_DIR/proj/proj.db"
+          test -f "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| WMS |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| GTiff |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| GPKG |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| MVT |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| KML |' "$DIST_DIR/mapper-gdal-info.txt"
+          grep -q '| DXF |' "$DIST_DIR/mapper-gdal-info.txt"
+          compgen -G "$DIST_DIR/Qt5*.dll" > /dev/null
+
+      # Run from the packaged tree via PowerShell (not the MSYS2 shell) so
+      # the shipped DLLs are what get exercised. With Schannel curl this
+      # verifies against the Windows certificate store — exactly what an
+      # end-user machine does.
+      - name: Smoke test HTTPS certificate verification
+        shell: powershell
+        run: |
+          $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
+          $output = (& (Join-Path $rootDir "mapper-gdal-info.exe") --tls-check https://example.com/ 2>&1) -join "`n"
+          Write-Host $output
+          if ($LASTEXITCODE -ne 0 -or $output -notmatch "TLS: ok") {
+            throw "Packaged GDAL/curl failed HTTPS certificate verification."
+          }
+
+      - name: Smoke test Mapper startup
+        id: smoke_test
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $rootDir = Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR
+          $mapperExe = Join-Path $rootDir "Mapper.exe"
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "mapper-startup.stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "mapper-startup.stderr.txt"
+          Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+          $env:QT_DEBUG_PLUGINS = "1"
+          $env:QT_LOGGING_RULES = "qt.qpa.*=true"
+          $process = Start-Process `
+            -FilePath $mapperExe `
+            -WorkingDirectory $rootDir `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+          if ($process.WaitForExit(10000)) {
+            Write-Host "Mapper.exe exited during startup smoke test with code $($process.ExitCode)."
+            if (Test-Path $stdoutPath) {
+              Write-Host "--- Mapper stdout ---"
+              Get-Content $stdoutPath
+            }
+            if (Test-Path $stderrPath) {
+              Write-Host "--- Mapper stderr ---"
+              Get-Content $stderrPath
+            }
+            "MAPPER_SMOKE_FAILED=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            return
+          }
+
+          Stop-Process -Id $process.Id -Force
+
+      - name: Fail on startup smoke test failure
+        if: ${{ steps.smoke_test.outcome == 'failure' || env.MAPPER_SMOKE_FAILED == '1' }}
+        shell: powershell
+        run: throw "Mapper.exe failed startup smoke test."
+
+      - name: Create portable ZIP
+        shell: powershell
+        run: |
+          $shortSha = (git rev-parse --short=7 HEAD).Trim()
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE "dist\OOM-COC-Edition-Base-$env:VERSION_DISPLAY-windows-x64-$shortSha.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $env:DIST_DIR) -DestinationPath $zipPath -CompressionLevel Optimal
+
+      - name: Create Windows installer
+        run: |
+          mkdir -p dist
+          cpack --config "$BUILD_DIR/CPackConfig.cmake" -G NSIS -B dist
+          short_sha="${GITHUB_SHA:0:7}"
+          installer="$(find dist -maxdepth 1 -type f -name '*.exe' | head -n 1)"
+          test -n "$installer"
+          target="dist/OOM-COC-Edition-Base-$VERSION_DISPLAY-windows-x64-installer-$short_sha.exe"
+          mv "$installer" "$target"
+          test -s "$target"
+
+      - name: Smoke test Windows installer
+        id: installer_smoke_test
+        shell: powershell
+        run: |
+          $installer = Get-ChildItem `
+            -Path (Join-Path $env:GITHUB_WORKSPACE "dist") `
+            -Filter "OOM-COC-Edition-Base-*-windows-x64-installer-*.exe" `
+            | Select-Object -First 1
+
+          if (-not $installer) {
+            throw "Installer artifact was not created."
+          }
+
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          Write-Host "Installer Authenticode status: $($signature.Status)"
+
+          $installRoot = Join-Path $env:RUNNER_TEMP "mapper-installer-smoke"
+          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $installRoot | Out-Null
+
+          $installProcess = Start-Process `
+            -FilePath $installer.FullName `
+            -ArgumentList @("/S", "/D=$installRoot") `
+            -PassThru
+
+          if (-not $installProcess.WaitForExit(60000)) {
+            Stop-Process -Id $installProcess.Id -Force
+            throw "Installer did not complete within 60 seconds."
+          }
+          if ($installProcess.ExitCode -ne 0) {
+            throw "Installer exited with code $($installProcess.ExitCode)."
+          }
+
+          $mapperExe = Get-ChildItem -Path $installRoot -Recurse -Filter Mapper.exe | Select-Object -First 1
+          if (-not $mapperExe) {
+            Get-ChildItem -Path $installRoot -Recurse | Select-Object -First 200 | Format-Table FullName
+            throw "Installed Mapper.exe was not found."
+          }
+
+          $rootDir = $mapperExe.Directory.FullName
+          foreach ($requiredPath in @(
+            "qt.conf",
+            "gdal\gdalvrt.xsd",
+            "proj\proj.db"
+          )) {
+            if (-not (Test-Path (Join-Path $rootDir $requiredPath))) {
+              throw "Installed tree is missing $requiredPath."
+            }
+          }
+          if (Test-Path (Join-Path $rootDir "gdal\curl-ca-bundle.crt")) {
+            throw "Installed tree ships a CA bundle; Schannel curl must use the Windows certificate store."
+          }
+          if (-not (Get-ChildItem -Path $rootDir -Filter "Qt5*.dll" | Select-Object -First 1)) {
+            throw "Installed tree is missing Qt runtime DLLs."
+          }
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "mapper-installed-startup.stdout.txt"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "mapper-installed-startup.stderr.txt"
+          Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+
+          $env:QT_DEBUG_PLUGINS = "1"
+          $env:QT_LOGGING_RULES = "qt.qpa.*=true"
+          $mapperProcess = Start-Process `
+            -FilePath $mapperExe.FullName `
+            -WorkingDirectory $rootDir `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+          if ($mapperProcess.WaitForExit(10000)) {
+            Write-Host "Installed Mapper.exe exited during startup smoke test with code $($mapperProcess.ExitCode)."
+            if (Test-Path $stdoutPath) {
+              Write-Host "--- Installed Mapper stdout ---"
+              Get-Content $stdoutPath
+            }
+            if (Test-Path $stderrPath) {
+              Write-Host "--- Installed Mapper stderr ---"
+              Get-Content $stderrPath
+            }
+            throw "Installed Mapper.exe failed startup smoke test."
+          }
+
+          Stop-Process -Id $mapperProcess.Id -Force
+
+      - name: Write release artifact manifest
+        shell: powershell
+        env:
+          PORTABLE_SMOKE_OUTCOME: ${{ steps.smoke_test.outcome }}
+          INSTALLER_SMOKE_OUTCOME: ${{ steps.installer_smoke_test.outcome }}
+        run: |
+          $distDir = Join-Path $env:GITHUB_WORKSPACE "dist"
+          $artifacts = foreach ($file in Get-ChildItem -Path $distDir -File | Where-Object { $_.Extension -in @(".exe", ".zip") }) {
+            $signingStatus = if ($file.Extension -eq ".exe") {
+              (Get-AuthenticodeSignature $file.FullName).Status.ToString()
+            } else {
+              "NotApplicable"
+            }
+            $smokeOutcome = if ($file.Extension -eq ".exe") {
+              $env:INSTALLER_SMOKE_OUTCOME
+            } else {
+              $env:PORTABLE_SMOKE_OUTCOME
+            }
+            if ($smokeOutcome -ne "success") {
+              throw "Refusing to publish a manifest with smoke outcome '$smokeOutcome' for $($file.Name)."
+            }
+            [ordered]@{
+              name = $file.Name
+              bytes = $file.Length
+              sha256 = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+              signingStatus = $signingStatus
+              smokeTest = $smokeOutcome
+            }
+          }
+
+          $manifest = [ordered]@{
+            product = "OOM - COC Edition - Base"
+            supportedPlatform = "Windows x64"
+            branch = $env:GITHUB_REF_NAME
+            commit = $env:GITHUB_SHA
+            runUrl = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            generatedAtUtc = [DateTime]::UtcNow.ToString("o")
+            artifacts = @($artifacts)
+          }
+
+          $manifestPath = Join-Path $distDir "oom-coc-edition-base-release-manifest.json"
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding utf8
+          Get-Content $manifestPath
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          name: oom-coc-edition-base-windows-x64-portable
+          path: dist/OOM-COC-Edition-Base-*-windows-x64-*.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: oom-coc-edition-base-windows-x64-installer
+          path: dist/OOM-COC-Edition-Base-*-windows-x64-installer-*.exe
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: oom-coc-edition-base-release-manifest
+          path: dist/oom-coc-edition-base-release-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    # Skipped on push until CI modernization (superbuild caching, disk
+    # management) — see https://github.com/EthanOConnor/mapper/pull/9.
+    # Run on demand via workflow_dispatch with build_android=true.
+    if: ${{ inputs.build_android }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      BUILD_DIR: build/android-release
+      GITHUB_TOKEN: ${{ github.token }}
+      SUPERBUILD_SOURCE_DIR: .tmp/superbuild
+      SUPERBUILD_REF: 33349002a2dbbb364cfaccf88afcef420bc24d69
+      TARGET: aarch64-linux-android
+      TARGET_ABI: arm64-v8a
+      APP_ID: org.openorienteering.mapper.coc.minimal
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake doxygen graphviz nasm ninja-build patch python3-lxml \
+            sharutils unzip zip \
+            '^libxcb.*-dev' libglu1-mesa-dev libx11-xcb-dev libxi-dev libxrender-dev
+
+      - name: Check out superbuild
+        run: |
+          git clone --depth 1 https://github.com/OpenOrienteering/superbuild.git "$SUPERBUILD_SOURCE_DIR"
+          git -C "$SUPERBUILD_SOURCE_DIR" fetch --depth 1 origin "$SUPERBUILD_REF"
+          git -C "$SUPERBUILD_SOURCE_DIR" checkout --detach "$SUPERBUILD_REF"
+
+      - name: Compute artifact metadata
+        run: |
+          source_sha="$(git rev-parse --short=7 HEAD)"
+          echo "SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=OpenOrienteering-Mapper-coc-minimal-android-${TARGET_ABI}-${source_sha}.apk" >> "$GITHUB_ENV"
+
+      - name: Build Android APK
+        env:
+          ANDROID_INSTALL_ROOT: ${{ github.workspace }}/.tmp/android-sdk
+        run: |
+          bash packaging/android/build-gh-apk.sh \
+            "$SUPERBUILD_SOURCE_DIR" \
+            . \
+            "$BUILD_DIR" \
+            "$TARGET" \
+            "$APP_ID" \
+            "$BUILD_DIR/release/$ASSET_NAME"
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-minimal-android-arm64-apk
+          path: ${{ env.BUILD_DIR }}/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

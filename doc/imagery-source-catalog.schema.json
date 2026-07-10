@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenOrienteering imagery source catalog",
+  "description": "Informative authoring schema. The Mapper C++ validator is normative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "id", "revision", "name", "sources"],
+  "properties": {
+    "$schema": {"type": "string", "format": "uri-reference", "maxLength": 4096},
+    "format": {"const": "org.openorienteering.imagery-catalog"},
+    "version": {"const": 1},
+    "id": {"$ref": "#/$defs/id"},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+    "name": {"$ref": "#/$defs/text"},
+    "description": {"$ref": "#/$defs/text"},
+    "publisher": {"$ref": "#/$defs/publisher"},
+    "created": {"$ref": "#/$defs/date"},
+    "updated": {"$ref": "#/$defs/date"},
+    "catalogLicense": {"$ref": "#/$defs/text"},
+    "requires": {"$ref": "#/$defs/capabilities"},
+    "resources": {
+      "type": "object",
+      "maxProperties": 1000,
+      "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {"$ref": "#/$defs/resource"}
+    },
+    "extensions": {"$ref": "#/$defs/extensions"},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": {"$ref": "#/$defs/source"}
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+    },
+    "date": {"type": "string", "format": "date"},
+    "httpUrl": {
+      "type": "string",
+      "maxLength": 8192,
+      "pattern": "^https?://[^\\s]+$"
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/id"}
+    },
+    "extensions": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 255,
+        "pattern": "^[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+$"
+      },
+      "additionalProperties": true
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"$ref": "#/$defs/text"},
+        "url": {"$ref": "#/$defs/httpUrl"},
+        "contactUrl": {"$ref": "#/$defs/httpUrl"}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["href", "mediaType", "sha256", "size"],
+      "properties": {
+        "href": {"type": "string", "minLength": 1, "maxLength": 8192},
+        "mediaType": {"type": "string", "minLength": 1, "maxLength": 255},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 1, "maximum": 1073741824}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "tiles", "scheme"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "name": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "type": {"const": "raster-tiles"},
+        "tiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {"$ref": "#/$defs/httpUrl"}
+        },
+        "scheme": {"enum": ["xyz", "tms"]},
+        "format": {
+          "type": "string",
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$"
+        },
+        "minTileMatrix": {"$ref": "#/$defs/matrixId"},
+        "maxTileMatrix": {"$ref": "#/$defs/matrixId"},
+        "tileMatrixSetURI": {"$ref": "#/$defs/httpUrl"},
+        "tileMatrixSet": {"$ref": "#/$defs/tileMatrixSet"},
+        "tileMatrixLimits": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/tileMatrixLimits"}
+        },
+        "request": {"$ref": "#/$defs/request"},
+        "requires": {"$ref": "#/$defs/capabilities"},
+        "category": {"enum": ["aerial", "satellite", "map", "elevation", "other"]},
+        "startDate": {"$ref": "#/$defs/date"},
+        "endDate": {"$ref": "#/$defs/date"},
+        "coverage": {"$ref": "#/$defs/geometry"},
+        "notices": {"$ref": "#/$defs/notices"},
+        "registration": {"$ref": "#/$defs/registration"},
+        "extensions": {"$ref": "#/$defs/extensions"}
+      },
+      "oneOf": [
+        {"required": ["tileMatrixSetURI"], "not": {"required": ["tileMatrixSet"]}},
+        {"required": ["tileMatrixSet"], "not": {"required": ["tileMatrixSetURI"]}}
+      ]
+    },
+    "matrixId": {"type": "string", "minLength": 1, "maxLength": 64},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "referer": {"$ref": "#/$defs/httpUrl"},
+        "emptyHttpStatusCodes": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 100, "maximum": 599}
+        }
+      }
+    },
+    "tileMatrixSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "crs", "tileMatrices"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "keywords": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/text"}
+        },
+        "uri": {"type": "string", "format": "uri", "maxLength": 4096},
+        "orderedAxes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/text"}
+        },
+        "crs": {"$ref": "#/$defs/crs"},
+        "wellKnownScaleSet": {"type": "string", "format": "uri", "maxLength": 4096},
+        "boundingBox": {"$ref": "#/$defs/boundingBox"},
+        "tileMatrices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/tileMatrix"}
+        }
+      }
+    },
+    "crs": {
+      "type": "string",
+      "pattern": "^(?:EPSG:[1-9][0-9]*|https?://www\\.opengis\\.net/def/crs/EPSG/(?:0|[0-9.]+)/[1-9][0-9]*)$"
+    },
+    "boundingBox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lowerLeft", "upperRight"],
+      "properties": {
+        "crs": {"$ref": "#/$defs/crs"},
+        "orderedAxes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/text"}
+        },
+        "lowerLeft": {"$ref": "#/$defs/position"},
+        "upperRight": {"$ref": "#/$defs/position"}
+      }
+    },
+    "position": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"type": "number"}
+    },
+    "tileMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "scaleDenominator", "cellSize", "pointOfOrigin",
+        "tileWidth", "tileHeight", "matrixWidth", "matrixHeight"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/matrixId"},
+        "title": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "keywords": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/text"}
+        },
+        "scaleDenominator": {"type": "number", "exclusiveMinimum": 0},
+        "cellSize": {"type": "number", "exclusiveMinimum": 0},
+        "pointOfOrigin": {"$ref": "#/$defs/position"},
+        "cornerOfOrigin": {"enum": ["topLeft", "bottomLeft"]},
+        "tileWidth": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "tileHeight": {"type": "integer", "minimum": 1, "maximum": 65536},
+        "matrixWidth": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "matrixHeight": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "variableMatrixWidths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["coalesce", "minTileRow", "maxTileRow"],
+            "properties": {
+              "coalesce": {"type": "integer", "minimum": 2},
+              "minTileRow": {"type": "integer", "minimum": 0},
+              "maxTileRow": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "tileMatrixLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tileMatrix", "minTileRow", "maxTileRow", "minTileCol", "maxTileCol"],
+      "properties": {
+        "tileMatrix": {"$ref": "#/$defs/matrixId"},
+        "minTileRow": {"type": "integer", "minimum": 0},
+        "maxTileRow": {"type": "integer", "minimum": 0},
+        "minTileCol": {"type": "integer", "minimum": 0},
+        "maxTileCol": {"type": "integer", "minimum": 0}
+      }
+    },
+    "notices": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attributionText": {"$ref": "#/$defs/text"},
+        "attributionUrl": {"$ref": "#/$defs/httpUrl"},
+        "sourceUrl": {"$ref": "#/$defs/httpUrl"},
+        "termsUrl": {"$ref": "#/$defs/httpUrl"},
+        "privacyUrl": {"$ref": "#/$defs/httpUrl"},
+        "notes": {"$ref": "#/$defs/text"}
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["crs"],
+      "properties": {
+        "crs": {"$ref": "#/$defs/crs"},
+        "id": {"$ref": "#/$defs/id"}
+      }
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "sourceFrame", "targetFrame", "operation"],
+      "properties": {
+        "direction": {"const": "source-to-corrected"},
+        "sourceFrame": {"$ref": "#/$defs/frame"},
+        "targetFrame": {"$ref": "#/$defs/frame"},
+        "operation": {
+          "oneOf": [
+            {"$ref": "#/$defs/translation"},
+            {"$ref": "#/$defs/affine"},
+            {"$ref": "#/$defs/gridShift"}
+          ]
+        },
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "translation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "unit", "dx", "dy"],
+      "properties": {
+        "type": {"const": "translation2d"},
+        "unit": {"const": "crs"},
+        "dx": {"type": "number"},
+        "dy": {"type": "number"}
+      }
+    },
+    "affine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "unit", "xoff", "yoff", "s11", "s12", "s21", "s22"],
+      "properties": {
+        "type": {"const": "affine2d"},
+        "unit": {"const": "crs"},
+        "xoff": {"type": "number"},
+        "yoff": {"type": "number"},
+        "s11": {"type": "number"},
+        "s12": {"type": "number"},
+        "s21": {"type": "number"},
+        "s22": {"type": "number"}
+      }
+    },
+    "gridShift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "resource", "domain", "gridFrame", "interpolation"],
+      "properties": {
+        "type": {"const": "gridShift"},
+        "resource": {"$ref": "#/$defs/id"},
+        "domain": {"enum": ["horizontal", "vertical", "horizontal-and-vertical"]},
+        "gridFrame": {"$ref": "#/$defs/frame"},
+        "interpolation": {"enum": ["bilinear", "biquadratic", "bicubic"]}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {"$ref": "#/$defs/text"},
+        "observed": {"$ref": "#/$defs/date"},
+        "author": {"$ref": "#/$defs/text"},
+        "rmsError": {"type": "number", "minimum": 0},
+        "notes": {"$ref": "#/$defs/text"}
+      }
+    },
+    "geometry": {
+      "oneOf": [
+        {"$ref": "#/$defs/point"},
+        {"$ref": "#/$defs/multiPoint"},
+        {"$ref": "#/$defs/lineString"},
+        {"$ref": "#/$defs/multiLineString"},
+        {"$ref": "#/$defs/polygon"},
+        {"$ref": "#/$defs/multiPolygon"},
+        {"$ref": "#/$defs/geometryCollection"}
+      ]
+    },
+    "coordinate": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {"type": "number"}
+    },
+    "coordinateArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/coordinate"}
+    },
+    "linearRing": {
+      "type": "array",
+      "minItems": 4,
+      "items": {"$ref": "#/$defs/coordinate"}
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "coordinates"],
+      "properties": {"type": {"const": "Point"}, "coordinates": {"$ref": "#/$defs/coordinate"}}
+    },
+    "multiPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "coordinates"],
+      "properties": {"type": {"const": "MultiPoint"}, "coordinates": {"$ref": "#/$defs/coordinateArray"}}
+    },
+    "lineString": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "coordinates"],
+      "properties": {"type": {"const": "LineString"}, "coordinates": {"$ref": "#/$defs/coordinateArray"}}
+    },
+    "multiLineString": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {"const": "MultiLineString"},
+        "coordinates": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/coordinateArray"}}
+      }
+    },
+    "polygon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {"const": "Polygon"},
+        "coordinates": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/linearRing"}}
+      }
+    },
+    "multiPolygon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {"const": "MultiPolygon"},
+        "coordinates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/linearRing"}}
+        }
+      }
+    },
+    "geometryCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "geometries"],
+      "properties": {
+        "type": {"const": "GeometryCollection"},
+        "geometries": {"type": "array", "items": {"$ref": "#/$defs/geometry"}}
+      }
+    }
+  }
+}

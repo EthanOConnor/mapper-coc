@@ -1,0 +1,17 @@
+{
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.example.imagery.invalid-url",
+  "revision": 1,
+  "name": "Invalid tile URL fixture",
+  "sources": [
+    {
+      "id": "invalid-url",
+      "name": "Invalid URL",
+      "type": "raster-tiles",
+      "tiles": ["file:///etc/passwd?z={z}&x={x}&y={y}"],
+      "scheme": "xyz",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"
+    }
+  ]
+}

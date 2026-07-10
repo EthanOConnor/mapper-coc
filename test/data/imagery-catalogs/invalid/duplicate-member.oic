@@ -1,0 +1,9 @@
+{
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.example.imagery.duplicate-member",
+  "revision": 1,
+  "name": "Invalid duplicate member fixture",
+  "name": "This second value must never replace the first",
+  "sources": []
+}

@@ -1,0 +1,21 @@
+--- a/qt-5.12.10.cmake
++++ b/qt-5.12.10.cmake
+@@ -162,0 +163,13 @@
++set(qtbase-gcc-11-moc_patch [[
++diff --git a/src/tools/moc/generator.cpp b/src/tools/moc/generator.cpp
++--- a/src/tools/moc/generator.cpp
+++++ b/src/tools/moc/generator.cpp
++@@ -37,6 +37,7 @@
++ #include <QtCore/qplugin.h>
++ #include <QtCore/qstringview.h>
++
+++#include <limits>
++ #include <math.h>
++ #include <stdio.h>
++]])
++
+@@ -213,0 +227 @@
++    qtbase-gcc-11-moc.patch  qtbase-gcc-11-moc_patch
+@@ -250,0 +265,2 @@
++      patch -p1 < qtbase-gcc-11-moc.patch
++    COMMAND
