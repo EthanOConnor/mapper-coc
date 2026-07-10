@@ -20,6 +20,7 @@
 #include "online_imagery_template_builder.h"
 
 #include <cmath>
+#include <functional>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -59,6 +60,14 @@ QString shortHash(const QString& input)
 {
 	auto hash = QCryptographicHash::hash(input.toUtf8(), QCryptographicHash::Sha1);
 	return QString::fromLatin1(hash.toHex().left(6));
+}
+
+int matrixIndex(const OnlineImagerySource& source, const QString& id)
+{
+	for (int i = 0; i < source.tile_matrix_set.tile_matrices.size(); ++i)
+		if (source.tile_matrix_set.tile_matrices.at(i).id == id)
+			return i;
+	return -1;
 }
 
 QString displayNameFromUrl(const QString& url)
@@ -171,12 +180,21 @@ OnlineImageryTemplateBuilder::generateXml(
 		return result;
 	}
 
-	auto mercator_bbox = mapExtentToWebMercator(map_extent, georef);
-	if (mercator_bbox.width() <= 0 || mercator_bbox.height() <= 0)
+	auto const generic_grid = !source.tile_matrix_set.tile_matrices.isEmpty();
+	auto const generic_max_index = generic_grid ? matrixIndex(source, source.max_tile_matrix) : -1;
+	auto const projection_tolerance = generic_max_index >= 0
+	                                  ? source.tile_matrix_set.tile_matrices.at(generic_max_index).cell_size * 0.25
+	                                  : 0.0;
+	auto source_bbox = generic_grid
+	                   ? mapExtentToSource(map_extent, georef, source.tile_matrix_set.crs, projection_tolerance)
+	                   : mapExtentToWebMercator(map_extent, georef);
+	if (source_bbox.width() <= 0 || source_bbox.height() <= 0)
 	{
-		result.error = tr("Could not convert the selected coverage area to Web Mercator coordinates.");
+		result.error = tr("Could not convert the selected coverage area to the imagery source coordinates.");
 		return result;
 	}
+	if (generic_grid && source.registration.operation_type == ImageryRegistration::OperationType::Translation2d)
+		source_bbox.translate(-source.registration.dx, -source.registration.dy);
 
 	auto tile_size = source.tile_size.width();
 	if (tile_size <= 0)
@@ -185,7 +203,20 @@ OnlineImageryTemplateBuilder::generateXml(
 	if (max_level <= 0)
 		max_level = 20;
 
-	auto crop = snapToTileGrid(mercator_bbox, max_level, tile_size);
+	auto crop = generic_grid ? snapToTileGrid(source_bbox, source)
+	                         : snapToTileGrid(source_bbox, max_level, tile_size);
+	if (crop.pixel_width <= 0 || crop.pixel_height <= 0)
+	{
+		result.error = tr("The selected coverage does not intersect the imagery tile grid.");
+		return result;
+	}
+	if (generic_grid && source.registration.operation_type == ImageryRegistration::OperationType::Translation2d)
+	{
+		crop.west += source.registration.dx;
+		crop.east += source.registration.dx;
+		crop.north += source.registration.dy;
+		crop.south += source.registration.dy;
+	}
 	auto width_m = crop.east - crop.west;
 	auto height_m = crop.north - crop.south;
 	result.area_km2 = (width_m * height_m) / 1e6;
@@ -202,12 +233,19 @@ OnlineImageryTemplateBuilder::generateXml(
 	case OnlineImagerySource::Kind::Unknown:
 		Q_UNREACHABLE();
 	}
+	server_url.replace(QStringLiteral("{z}"), QStringLiteral("${z}"));
+	server_url.replace(QStringLiteral("{x}"), QStringLiteral("${x}"));
+	server_url.replace(QStringLiteral("{y}"), QStringLiteral("${y}"));
 
 	QString xml;
 	QTextStream out(&xml);
 	out << QStringLiteral("<GDAL_WMS>\n");
+	if (!source.operational_fingerprint.isEmpty())
+		out << QStringLiteral("  <!-- OperationalFingerprint: ") << QString::fromLatin1(source.operational_fingerprint) << QStringLiteral(" -->\n");
 	out << QStringLiteral("  <Service name=\"TMS\">\n");
 	out << QStringLiteral("    <ServerUrl>") << server_url.toHtmlEscaped() << QStringLiteral("</ServerUrl>\n");
+	if (generic_grid && !source.format.isEmpty())
+		out << QStringLiteral("    <ImageFormat>") << source.format.toHtmlEscaped() << QStringLiteral("</ImageFormat>\n");
 	out << QStringLiteral("  </Service>\n");
 	out << QStringLiteral("  <DataWindow>\n");
 	out << QStringLiteral("    <UpperLeftX>") << QString::number(crop.west, 'f', 6) << QStringLiteral("</UpperLeftX>\n");
@@ -217,15 +255,31 @@ OnlineImageryTemplateBuilder::generateXml(
 	out << QStringLiteral("    <SizeX>") << crop.pixel_width << QStringLiteral("</SizeX>\n");
 	out << QStringLiteral("    <SizeY>") << crop.pixel_height << QStringLiteral("</SizeY>\n");
 	out << QStringLiteral("    <TileLevel>") << crop.tile_level << QStringLiteral("</TileLevel>\n");
+	if (generic_grid)
+	{
+		auto const min_index = matrixIndex(source, source.min_tile_matrix);
+		auto const max_index = matrixIndex(source, source.max_tile_matrix);
+		out << QStringLiteral("    <OverviewCount>") << max_index - min_index << QStringLiteral("</OverviewCount>\n");
+	}
 	out << QStringLiteral("    <TileX>") << crop.tile_x_min << QStringLiteral("</TileX>\n");
 	out << QStringLiteral("    <TileY>") << crop.tile_y_min << QStringLiteral("</TileY>\n");
-	out << QStringLiteral("    <YOrigin>top</YOrigin>\n");
+	out << QStringLiteral("    <YOrigin>") << (source.scheme == QLatin1String("tms") ? QStringLiteral("bottom") : QStringLiteral("top")) << QStringLiteral("</YOrigin>\n");
 	out << QStringLiteral("  </DataWindow>\n");
-	out << QStringLiteral("  <Projection>EPSG:3857</Projection>\n");
+	out << QStringLiteral("  <Projection>") << (generic_grid ? source.tile_matrix_set.crs.toHtmlEscaped() : QStringLiteral("EPSG:3857")) << QStringLiteral("</Projection>\n");
 	out << QStringLiteral("  <BlockSizeX>") << tile_size << QStringLiteral("</BlockSizeX>\n");
 	out << QStringLiteral("  <BlockSizeY>") << tile_size << QStringLiteral("</BlockSizeY>\n");
 	out << QStringLiteral("  <BandsCount>3</BandsCount>\n");
-	out << QStringLiteral("  <ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>\n");
+	if (!generic_grid)
+		out << QStringLiteral("  <ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>\n");
+	else if (!source.request.empty_http_status_codes.isEmpty())
+	{
+		QStringList codes;
+		for (auto code : source.request.empty_http_status_codes)
+			codes.push_back(QString::number(code));
+		out << QStringLiteral("  <ZeroBlockHttpCodes>") << codes.join(QLatin1Char(',')) << QStringLiteral("</ZeroBlockHttpCodes>\n");
+	}
+	if (generic_grid && !source.request.referer.isEmpty())
+		out << QStringLiteral("  <Referer>") << source.request.referer.toHtmlEscaped() << QStringLiteral("</Referer>\n");
 	// Keep GDAL's default per-user cache location instead of baking a
 	// machine-local absolute cache path into the generated template file.
 	out << QStringLiteral("  <Cache />\n");
@@ -257,9 +311,24 @@ QString OnlineImageryTemplateBuilder::outputFileName(
 	QFileInfo map_info(map_path);
 	auto map_basename = map_info.completeBaseName();
 	auto slug = slugify(effectiveTemplateName(source, template_name));
-	auto hash = shortHash(source.normalized_url);
+	auto hash = source.operational_fingerprint.isEmpty()
+	            ? shortHash(source.normalized_url)
+	            : QString::fromLatin1(source.operational_fingerprint.left(12));
 	auto filename = QStringLiteral("%1_%2_online_%3.xml").arg(slug, map_basename, hash);
-	return map_info.absoluteDir().filePath(filename);
+	auto path = map_info.absoluteDir().filePath(filename);
+	if (source.operational_fingerprint.isEmpty() || !QFileInfo::exists(path))
+		return path;
+	QFile existing(path);
+	if (existing.open(QIODevice::ReadOnly) && existing.readAll().contains(source.operational_fingerprint))
+		return path;
+	for (int length = 16; length <= source.operational_fingerprint.size(); length += 4)
+	{
+		filename = QStringLiteral("%1_%2_online_%3.xml").arg(slug, map_basename, QString::fromLatin1(source.operational_fingerprint.left(length)));
+		path = map_info.absoluteDir().filePath(filename);
+		if (!QFileInfo::exists(path))
+			return path;
+	}
+	return {};
 }
 
 
@@ -302,6 +371,73 @@ QRectF OnlineImageryTemplateBuilder::mapExtentToWebMercator(
 	auto max_x = std::max({m_tl.x(), m_tr.x(), m_bl.x(), m_br.x()});
 	auto min_y = std::min({m_tl.y(), m_tr.y(), m_bl.y(), m_br.y()});
 	auto max_y = std::max({m_tl.y(), m_tr.y(), m_bl.y(), m_br.y()});
+	return QRectF(min_x, min_y, max_x - min_x, max_y - min_y);
+}
+
+
+QRectF OnlineImageryTemplateBuilder::mapExtentToSource(
+	const QRectF& map_extent,
+	const Georeferencing& georef,
+	const QString& crs,
+	double tolerance)
+{
+	if (georef.getState() != Georeferencing::Geospatial)
+		return {};
+	auto transform = ProjTransform(crs);
+	if (!transform.isValid())
+		return {};
+	auto project = [&georef, &transform](const QPointF& point, QPointF* output) {
+		bool ok = false;
+		auto const geographic = georef.toGeographicCoords(georef.toProjectedCoords(MapCoordF(point)), &ok);
+		if (!ok)
+			return false;
+		*output = transform.forward(geographic, &ok);
+		return ok && std::isfinite(output->x()) && std::isfinite(output->y());
+	};
+	QVector<QPointF> projected;
+	int samples = 0;
+	std::function<bool(const QPointF&, const QPointF&, const QPointF&, const QPointF&, int)> subdivide;
+	subdivide = [&](const QPointF& map_a, const QPointF& map_b, const QPointF& source_a, const QPointF& source_b, int depth) {
+		if (++samples > 4096)
+			return false;
+		auto const map_mid = (map_a + map_b) / 2.0;
+		QPointF source_mid;
+		if (!project(map_mid, &source_mid))
+			return false;
+		auto const chord_mid = (source_a + source_b) / 2.0;
+		auto const deviation = std::hypot(source_mid.x() - chord_mid.x(), source_mid.y() - chord_mid.y());
+		if (deviation <= tolerance)
+		{
+			projected.push_back(source_mid);
+			return true;
+		}
+		if (depth >= 12)
+			return false;
+		return subdivide(map_a, map_mid, source_a, source_mid, depth + 1)
+		       && subdivide(map_mid, map_b, source_mid, source_b, depth + 1);
+	};
+	auto const corners = QVector<QPointF> { map_extent.topLeft(), map_extent.topRight(), map_extent.bottomRight(), map_extent.bottomLeft() };
+	QVector<QPointF> source_corners;
+	for (auto const& point : corners)
+	{
+		QPointF source_point;
+		if (!project(point, &source_point))
+			return {};
+		source_corners.push_back(source_point);
+		projected.push_back(source_point);
+	}
+	for (int i = 0; i < corners.size(); ++i)
+		if (!subdivide(corners.at(i), corners.at((i + 1) % corners.size()), source_corners.at(i), source_corners.at((i + 1) % corners.size()), 0))
+			return {};
+	auto min_x = projected.first().x();
+	auto max_x = min_x;
+	auto min_y = projected.first().y();
+	auto max_y = min_y;
+	for (auto const& point : projected)
+	{
+		min_x = std::min(min_x, point.x()); max_x = std::max(max_x, point.x());
+		min_y = std::min(min_y, point.y()); max_y = std::max(max_y, point.y());
+	}
 	return QRectF(min_x, min_y, max_x - min_x, max_y - min_y);
 }
 
@@ -354,6 +490,66 @@ OnlineImageryTemplateBuilder::snapToTileGrid(
 	crop.south = origin_y - (crop.tile_y_max + 1) * tile_span;
 	crop.pixel_width = (crop.tile_x_max - crop.tile_x_min + 1) * tile_size;
 	crop.pixel_height = (crop.tile_y_max - crop.tile_y_min + 1) * tile_size;
+	return crop;
+}
+
+
+OnlineImageryTemplateBuilder::TileGridCrop
+OnlineImageryTemplateBuilder::snapToTileGrid(const QRectF& source_bbox, const OnlineImagerySource& source)
+{
+	TileGridCrop crop;
+	auto const min_index = matrixIndex(source, source.min_tile_matrix);
+	auto const max_index = matrixIndex(source, source.max_tile_matrix);
+	if (min_index < 0 || max_index < min_index)
+		return crop;
+	auto const& matrix = source.tile_matrix_set.tile_matrices.at(max_index);
+	bool level_ok = false;
+	crop.tile_level = matrix.id.toInt(&level_ok);
+	if (!level_ok)
+		return {};
+	auto const span_x = matrix.cell_size * matrix.tile_size.width();
+	auto const span_y = matrix.cell_size * matrix.tile_size.height();
+	auto min_col = qint64(0), max_col = matrix.matrix_width - 1;
+	auto min_row = qint64(0), max_row = matrix.matrix_height - 1;
+	for (auto const& limit : source.tile_matrix_limits)
+	{
+		if (limit.tile_matrix == matrix.id)
+		{
+			min_col = limit.min_tile_col; max_col = limit.max_tile_col;
+			min_row = limit.min_tile_row; max_row = limit.max_tile_row;
+		}
+	}
+	auto const top_origin = matrix.corner_of_origin == QLatin1String("topLeft");
+	auto const bbox_south = source_bbox.top();
+	auto const bbox_north = source_bbox.bottom();
+	auto x_min = qint64(std::floor((source_bbox.left() - matrix.point_of_origin.x()) / span_x));
+	auto x_max = qint64(std::ceil((source_bbox.right() - matrix.point_of_origin.x()) / span_x)) - 1;
+	auto y_min = top_origin
+	             ? qint64(std::floor((matrix.point_of_origin.y() - bbox_north) / span_y))
+	             : qint64(std::floor((bbox_south - matrix.point_of_origin.y()) / span_y));
+	auto y_max = top_origin
+	             ? qint64(std::ceil((matrix.point_of_origin.y() - bbox_south) / span_y)) - 1
+	             : qint64(std::ceil((bbox_north - matrix.point_of_origin.y()) / span_y)) - 1;
+	x_min = std::max(x_min, min_col); x_max = std::min(x_max, max_col);
+	y_min = std::max(y_min, min_row); y_max = std::min(y_max, max_row);
+	if (x_min > x_max || y_min > y_max)
+		return {};
+	crop.tile_x_min = int(x_min); crop.tile_x_max = int(x_max);
+	crop.tile_y_min = int(y_min); crop.tile_y_max = int(y_max);
+	crop.west = matrix.point_of_origin.x() + x_min * span_x;
+	crop.east = matrix.point_of_origin.x() + (x_max + 1) * span_x;
+	if (top_origin)
+	{
+		crop.north = matrix.point_of_origin.y() - y_min * span_y;
+		crop.south = matrix.point_of_origin.y() - (y_max + 1) * span_y;
+	}
+	else
+	{
+		crop.south = matrix.point_of_origin.y() + y_min * span_y;
+		crop.north = matrix.point_of_origin.y() + (y_max + 1) * span_y;
+	}
+	crop.pixel_width = int((x_max - x_min + 1) * matrix.tile_size.width());
+	crop.pixel_height = int((y_max - y_min + 1) * matrix.tile_size.height());
 	return crop;
 }
 

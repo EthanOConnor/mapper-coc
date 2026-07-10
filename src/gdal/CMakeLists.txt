@@ -28,6 +28,7 @@ set(MAPPER_GDAL_HEADERS
   imagery_catalog_reader.h
   imagery_json_canonicalizer.h
   imagery_source_fingerprint.h
+  imagery_source_resolver.h
   ogr_file_format_p.h
   online_imagery_source.h
 )
@@ -41,6 +42,7 @@ set(MAPPER_GDAL_SOURCES
   imagery_catalog_reader.cpp
   imagery_json_canonicalizer.cpp
   imagery_source_fingerprint.cpp
+  imagery_source_resolver.cpp
   kmz_groundoverlay_export.cpp
   online_imagery_template_builder.cpp
   ogr_file_format.cpp

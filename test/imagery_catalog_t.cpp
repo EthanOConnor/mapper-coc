@@ -22,6 +22,7 @@
 #include "gdal/imagery_catalog_reader.h"
 #include "gdal/imagery_json_canonicalizer.h"
 #include "gdal/imagery_source_fingerprint.h"
+#include "gdal/imagery_source_resolver.h"
 
 namespace OpenOrienteering {
 
@@ -210,6 +211,22 @@ private slots:
 		QCOMPARE(first.catalog.sources.first().full_fingerprint, second.catalog.sources.first().full_fingerprint);
 		QCOMPARE(first.catalog.sources.first().operational_fingerprint, second.catalog.sources.first().operational_fingerprint);
 		QVERIFY(first.catalog.document_sha256 != second.catalog.document_sha256);
+	}
+
+	void sourceResolution()
+	{
+		auto const valid = ImageryCatalogReader::read(fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json")));
+		QVERIFY(valid.accepted());
+		auto const resolved = ImagerySourceResolver::resolve(valid.catalog.sources.first());
+		QVERIFY2(resolved.error.isEmpty(), qPrintable(resolved.error));
+		QCOMPARE(resolved.source.tile_matrix_set.crs, QStringLiteral("EPSG:2927"));
+		QCOMPARE(resolved.source.request.referer, QStringLiteral("https://www.example.org/maps/"));
+		QCOMPARE(resolved.source.registration.operation_type, ImageryRegistration::OperationType::Translation2d);
+		QCOMPARE(resolved.source.operational_fingerprint, valid.catalog.sources.first().operational_fingerprint);
+
+		auto const unsupported = ImageryCatalogReader::read(fixture(QStringLiteral("unsupported/non-dyadic-matrix-set.oom-imagery.json")));
+		QVERIFY(unsupported.accepted());
+		QVERIFY(!ImagerySourceResolver::resolve(unsupported.catalog.sources.first()).error.isEmpty());
 	}
 
 	void invalidFixtures()

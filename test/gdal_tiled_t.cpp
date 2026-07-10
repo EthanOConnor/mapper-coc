@@ -44,6 +44,8 @@
 #include "gdal/gdal_image_reader.h"
 #include "gdal/gdal_manager.h"
 #include "gdal/gdal_template.h"
+#include "gdal/imagery_catalog_reader.h"
+#include "gdal/imagery_source_resolver.h"
 #include "gdal/online_imagery_template_builder.h"
 #include "gui/widgets/online_template_dialog.h"
 #include "templates/template.h"
@@ -361,6 +363,40 @@ private slots:
 			source,
 			QString{});
 		QVERIFY(QFileInfo(default_path).fileName().startsWith(QStringLiteral("example_imagery_wilburton_online_")));
+
+		source.operational_fingerprint = QByteArray(64, 'a');
+		auto fingerprint_path = OnlineImageryTemplateBuilder::outputFileName(
+			dir.filePath(QStringLiteral("wilburton.omap")), source, QStringLiteral("Catalog source"));
+		QVERIFY(fingerprint_path.contains(QStringLiteral("aaaaaaaaaaaa.xml")));
+		QVERIFY(!writeTextFile(fingerprint_path, QByteArray("unrelated file")).isEmpty());
+		auto extended_path = OnlineImageryTemplateBuilder::outputFileName(
+			dir.filePath(QStringLiteral("wilburton.omap")), source, QStringLiteral("Catalog source"));
+		QVERIFY(extended_path.contains(QStringLiteral("aaaaaaaaaaaaaaaa.xml")));
+	}
+
+	void customImageryTileGridTest()
+	{
+		QFile fixture(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)
+		              + QStringLiteral("/data/imagery-catalogs/valid/custom-dyadic-epsg2927.oom-imagery.json"));
+		QVERIFY(fixture.open(QIODevice::ReadOnly));
+		auto const catalog = ImageryCatalogReader::read(fixture.readAll());
+		QVERIFY(catalog.accepted());
+		auto const resolved = ImagerySourceResolver::resolve(catalog.catalog.sources.first());
+		QVERIFY(resolved.error.isEmpty());
+		auto const& matrix = resolved.source.tile_matrix_set.tile_matrices.last();
+		auto const span = matrix.cell_size * matrix.tile_size.width();
+		auto const bbox = QRectF(matrix.point_of_origin.x() + 2.1 * span,
+		                         matrix.point_of_origin.y() - 3.9 * span,
+		                         1.7 * span,
+		                         1.7 * span);
+		auto const crop = OnlineImageryTemplateBuilder::snapToTileGrid(bbox, resolved.source);
+		QCOMPARE(crop.tile_level, 2);
+		QCOMPARE(crop.tile_x_min, 2);
+		QCOMPARE(crop.tile_x_max, 3);
+		QCOMPARE(crop.tile_y_min, 2);
+		QCOMPARE(crop.tile_y_max, 3);
+		QCOMPARE(crop.pixel_width, 512);
+		QCOMPARE(crop.pixel_height, 512);
 	}
 
 	void tiledCoreMathTest()

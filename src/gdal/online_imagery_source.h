@@ -23,6 +23,8 @@
 #include <QSize>
 #include <QString>
 
+#include "imagery_catalog.h"
+
 namespace OpenOrienteering {
 
 
@@ -45,6 +47,15 @@ struct OnlineImagerySource
 	QString normalized_url;
 	QSize tile_size;
 	int max_tile_level = -1;
+	QString scheme = QStringLiteral("xyz");
+	QString format = QStringLiteral("image/png");
+	QString min_tile_matrix;
+	QString max_tile_matrix;
+	TileMatrixSetDefinition tile_matrix_set;
+	QVector<TileMatrixLimitsDefinition> tile_matrix_limits;
+	ImageryRequestDefinition request;
+	ImageryRegistration registration;
+	QByteArray operational_fingerprint;
 };
 
 

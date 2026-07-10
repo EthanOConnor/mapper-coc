@@ -174,6 +174,7 @@ if (Mapper_USE_GDAL)
 		../src/gdal/imagery_catalog_reader
 		../src/gdal/imagery_json_canonicalizer
 		../src/gdal/imagery_source_fingerprint
+		../src/gdal/imagery_source_resolver
 	)
 	add_unit_test(imagery_json_canonicalizer_t ../src/gdal/imagery_json_canonicalizer)
 	# cf. src/gdal/CMakeLists.txt
