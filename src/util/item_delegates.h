@@ -61,6 +61,20 @@ public:
 
 
 /**
+ * An item delegate which paints check indicators without using the native style.
+ */
+class CheckBoxItemDelegate : public QStyledItemDelegate
+{
+public:
+	using QStyledItemDelegate::QStyledItemDelegate;
+
+	/** Renders the cell and its check state. */
+	void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
+};
+
+
+
+/**
  *  A QItemDelegate which provides an editor of type (integer) spin box.
  * 
  *  Unlike the default editor behaviour, the spin box will commit each single

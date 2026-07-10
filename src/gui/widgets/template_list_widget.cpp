@@ -218,6 +218,7 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	if (mobile_mode)
 	{
 		template_model->setTouchMode(true);
+		template_table->setItemDelegateForColumn(TemplateTableModel::visibilityColumn(), new CheckBoxItemDelegate(template_table));
 		
 		header_view->setSectionResizeMode(TemplateTableModel::visibilityColumn(), QHeaderView::Stretch);
 		header_view->setSectionResizeMode(TemplateTableModel::opacityColumn(), QHeaderView::ResizeToContents);
@@ -229,6 +230,8 @@ TemplateListWidget::TemplateListWidget(Map& map, MapView& main_view, MapEditorCo
 	}
 	else
 	{
+		template_table->setItemDelegateForColumn(TemplateTableModel::visibilityColumn(), new CheckBoxItemDelegate(template_table));
+
 		header_view->setSectionResizeMode(TemplateTableModel::visibilityColumn(), QHeaderView::Fixed);
 		header_view->setSectionResizeMode(TemplateTableModel::opacityColumn(), QHeaderView::ResizeToContents);
 		header_view->setSectionResizeMode(TemplateTableModel::nameColumn(), QHeaderView::Stretch);
