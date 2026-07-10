@@ -17,6 +17,7 @@ output=$2
 gdal_license=$3
 gdal_version=$4
 mingw_prefix=${MINGW_PREFIX:-/mingw64}
+source_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 if [[ ! -d $staged_tree || ! -s $gdal_license ]]; then
 	echo "staged tree or GDAL license is missing" >&2
@@ -70,7 +71,14 @@ mkdir -p "$(dirname "$output")"
 
 	while IFS= read -r owner; do
 		[[ -n $owner ]] || continue
+		owner_version=$(pacman -Q "$owner")
+		package_version=${owner_version#"$owner "}
+		package_licenses=$(
+			pacman -Qi "$owner" |
+				awk -F ': ' '/^Licenses[[:space:]]*:/ { print $2 }'
+		)
 		license_files=()
+		fallback_label=
 		while IFS= read -r license_file; do
 			license_files+=("$license_file")
 		done < <(
@@ -83,16 +91,39 @@ mkdir -p "$(dirname "$output")"
 						 print $2
 					 }'
 		)
+
+		if [[ ${#license_files[@]} -eq 0 ]]; then
+			case $owner in
+			mingw-w64-x86_64-libidn2)
+				if [[ $package_licenses == *spdx:GPL-2.0-or-later* && -s $source_root/COPYING ]]; then
+					license_files+=("$source_root/COPYING")
+					fallback_label="curated fallback: GPL-3.0 under libidn2's GPL-2.0-or-later option"
+				fi
+				;;
+			mingw-w64-x86_64-lz4)
+				fallback_file="$source_root/packaging/windows/runtime-license-fallbacks/lz4-1.10.0-BSD-2-Clause.txt"
+				if [[ $package_version == 1.10.0-* && $package_licenses == *BSD* && -s $fallback_file ]]; then
+					license_files+=("$fallback_file")
+					fallback_label="curated fallback: LZ4 1.10.0 library BSD-2-Clause license"
+				fi
+				;;
+			esac
+		fi
+
 		if [[ ${#license_files[@]} -eq 0 ]]; then
 			printf '%s\n' "$owner" >> "$missing_owners_file"
 			continue
 		fi
 
 		echo
-		echo "===== $(pacman -Q "$owner") ====="
+		echo "===== $owner_version ====="
 		for license_file in "${license_files[@]}"; do
 			echo
-			echo "----- $license_file -----"
+			if [[ -n $fallback_label ]]; then
+				echo "----- $fallback_label -----"
+			else
+				echo "----- $license_file -----"
+			fi
 			cat "$license_file"
 		done
 	done < "$owners_file"
