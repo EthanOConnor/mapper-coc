@@ -310,6 +310,30 @@ private slots:
 		settings.remove(QStringLiteral("onlineImagery"));
 	}
 
+	void onlineImageryManualSourcePlaceholderTest()
+	{
+		QTemporaryDir directory;
+		QVERIFY(directory.isValid());
+		auto const classified = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://tiles.example.test/{z}/{x}/{y}.png"));
+		QVERIFY(classified.error.isEmpty());
+		Georeferencing georef;
+		QVERIFY(georef.setProjectedCRS(QStringLiteral("Web Mercator"), QStringLiteral("EPSG:3857")));
+
+		auto const generated = OnlineImageryTemplateBuilder::generateXml(
+			classified.source,
+			QStringLiteral("Manual imagery"),
+			QRectF(-1000, -1000, 2000, 2000),
+			georef,
+			directory.filePath(QStringLiteral("manual.omap")));
+		QVERIFY2(generated.error.isEmpty(), qPrintable(generated.error));
+		QFile xml(generated.xml_path);
+		QVERIFY(xml.open(QIODevice::ReadOnly));
+		auto const contents = xml.readAll();
+		QVERIFY(contents.contains("https://tiles.example.test/${z}/${x}/${y}.png"));
+		QVERIFY(!contents.contains("$$"));
+	}
+
 	void onlineImageryCatalogImportTest()
 	{
 		QString const catalog_path = QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)

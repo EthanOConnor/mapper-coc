@@ -233,9 +233,12 @@ OnlineImageryTemplateBuilder::generateXml(
 	case OnlineImagerySource::Kind::Unknown:
 		Q_UNREACHABLE();
 	}
-	server_url.replace(QStringLiteral("{z}"), QStringLiteral("${z}"));
-	server_url.replace(QStringLiteral("{x}"), QStringLiteral("${x}"));
-	server_url.replace(QStringLiteral("{y}"), QStringLiteral("${y}"));
+	if (generic_grid)
+	{
+		server_url.replace(QStringLiteral("{z}"), QStringLiteral("${z}"));
+		server_url.replace(QStringLiteral("{x}"), QStringLiteral("${x}"));
+		server_url.replace(QStringLiteral("{y}"), QStringLiteral("${y}"));
+	}
 
 	QString xml;
 	QTextStream out(&xml);
