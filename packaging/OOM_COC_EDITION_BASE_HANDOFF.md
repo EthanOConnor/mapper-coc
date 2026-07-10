@@ -19,12 +19,16 @@ identity remain Mapper so existing maps and preferences continue to work.
 
 The supported online-imagery contract is deliberately narrow:
 
-- top-origin, 256 px Web Mercator XYZ tiles through the configured level; or
-- standard cached, 256 px Web Mercator ArcGIS MapServer tiles.
+- top-origin, 256 px Web Mercator XYZ tiles through the configured level;
+- standard cached, 256 px Web Mercator ArcGIS MapServer tiles; or
+- sources imported from a validated `.oic` imagery catalog, including
+  fixed-origin dyadic custom tile grids (see
+  `doc/imagery-source-catalog.md` and `examples/puget-sound.oic`).
 
-Bottom-origin TMS, arbitrary ArcGIS cache grids, authentication, provider
-metadata discovery, and attribution UI are not implemented. The exact source
-intended for the class must be validated manually.
+Authentication, provider metadata discovery, attribution UI, and
+non-dyadic tile grids are not implemented (non-dyadic catalog sources
+install disabled). The exact source intended for the class must be
+validated manually.
 
 ## Automated candidate gates
 
@@ -76,9 +80,13 @@ run.
 ## Clean-machine acceptance
 
 - [ ] If `0.9.7-COC.3` is installed, uninstall it with its own uninstaller
-      before installing `0.9.7-COC.4`; record the existing official Mapper
-      file associations first. The COC.4 uninstaller intentionally does not
-      invoke the older shared-association cleanup code.
+      before installing a newer preview; record the existing official Mapper
+      file associations first. Previews after COC.3 intentionally do not
+      register file associations or invoke the older shared-association
+      cleanup code.
+- [ ] Import the provided `.oic` catalog (e.g. `puget-sound.oic`) via
+      Templates → Online Imagery → Import catalog, and exercise at least one
+      catalog source through pan/zoom, visibility, save/reopen.
 - [ ] Use the exact installer named above on a clean Windows machine.
 - [ ] Record the expected SmartScreen/unknown-publisher flow if unsigned.
 - [ ] Confirm installation and first startup.

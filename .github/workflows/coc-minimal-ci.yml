@@ -199,7 +199,7 @@ jobs:
     env:
       BUILD_DIR: build/windows-portable
       DIST_DIR: dist/OpenOrienteering-Mapper-windows-x64
-      VERSION_DISPLAY: 0.9.7-COC.4
+      VERSION_DISPLAY: 0.9.7-COC.5
       GDAL_VERSION: 3.11.5
       # Bump whenever the "Build minimal GDAL" recipe changes (driver
       # list, CMake flags): the cache key does not see the recipe, so
