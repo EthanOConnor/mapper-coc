@@ -149,7 +149,14 @@ private slots:
 		QVERIFY(example.accepted());
 		QCOMPARE(example.catalog.sources.size(), 5);
 		for (auto const& source : example.catalog.sources)
+		{
 			QVERIFY(source.supported);
+			QCOMPARE(source.min_tile_matrix, QStringLiteral("10"));
+			if (source.id.startsWith(QStringLiteral("king-county-")))
+				QCOMPARE(source.max_tile_matrix, QStringLiteral("20"));
+			else if (source.id == QLatin1String("pierce-county-ortho"))
+				QCOMPARE(source.max_tile_matrix, QStringLiteral("10"));
+		}
 		for (auto const& source : example.catalog.sources.mid(0, 4))
 			QCOMPARE(source.request.empty_http_status_codes, QVector<int>({ 404 }));
 	}

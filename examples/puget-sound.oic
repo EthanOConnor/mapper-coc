@@ -17,8 +17,8 @@
       ],
       "scheme": "xyz",
       "format": "image/jpeg",
-      "minTileMatrix": "0",
-      "maxTileMatrix": "23",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "20",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
       "request": {
         "emptyHttpStatusCodes": [404]
@@ -37,8 +37,8 @@
       ],
       "scheme": "xyz",
       "format": "image/jpeg",
-      "minTileMatrix": "0",
-      "maxTileMatrix": "23",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "20",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
       "request": {
         "emptyHttpStatusCodes": [404]
@@ -57,8 +57,8 @@
       ],
       "scheme": "xyz",
       "format": "image/jpeg",
-      "minTileMatrix": "0",
-      "maxTileMatrix": "13",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "10",
       "tileMatrixSet": {
         "id": "pierce-county-epsg2927",
         "title": "Pierce County EPSG:2927 cached tile pyramid",
@@ -238,7 +238,7 @@
       ],
       "scheme": "xyz",
       "format": "image/jpeg",
-      "minTileMatrix": "0",
+      "minTileMatrix": "10",
       "maxTileMatrix": "23",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
       "request": {
@@ -258,7 +258,7 @@
       ],
       "scheme": "xyz",
       "format": "image/png",
-      "minTileMatrix": "0",
+      "minTileMatrix": "10",
       "maxTileMatrix": "19",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
       "category": "map",
