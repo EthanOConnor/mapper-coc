@@ -361,7 +361,7 @@ private slots:
 		auto* chooser = dialog.findChild<QComboBox*>(QStringLiteral("source_chooser"));
 		QVERIFY(chooser);
 		QCOMPARE(chooser->count(), 3);
-		QCOMPARE(chooser->itemText(2), QStringLiteral("Minimal imagery catalog — Example aerial"));
+		QCOMPARE(chooser->itemText(2), QStringLiteral("Example aerial"));
 		QCOMPARE(chooser->currentIndex(), 2);
 		auto* url_edit = dialog.findChild<QLineEdit*>(QStringLiteral("imagery_url"));
 		QVERIFY(url_edit);

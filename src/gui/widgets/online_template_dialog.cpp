@@ -364,7 +364,7 @@ void OnlineTemplateDialog::populateSourceChooser()
 				added_catalog_source = true;
 			}
 			auto const index = source_chooser->count();
-			source_chooser->addItem(tr("%1 — %2").arg(installed.read_result.catalog.name, source.name));
+			source_chooser->addItem(source.name);
 			source_chooser->setItemData(index, installed.read_result.catalog.id, catalog_id_role);
 			source_chooser->setItemData(index, source.id, catalog_source_id_role);
 			source_chooser->setItemData(index, source.name, source_name_role);
