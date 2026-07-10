@@ -389,6 +389,9 @@ jobs:
         env:
           GDAL_DATA: /mingw64/share/gdal
           PROJ_DATA: /mingw64/share/proj
+          # Hosted runners have no location service; the live position
+          # source test fails nondeterministically there.
+          SKIP_POWERSHELL_POSITION_SOURCE_LIVE_TEST: 1
         run: |
           test_tmp="$(pwd)/$BUILD_DIR/tmp"
           mkdir -p "$test_tmp"
