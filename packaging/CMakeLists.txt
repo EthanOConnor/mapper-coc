@@ -19,9 +19,10 @@
 message(STATUS "Configuring ${PROJECT_NAME} packaging")
 
 option(Mapper_PACKAGE_QT_ALL_TRANSLATIONS "Add all Qt translations to the packages" OFF)
+option(Mapper_PACKAGE_FILE_ASSOCIATIONS "Register Mapper document types with Windows" ON)
 set(Mapper_PACKAGE_EXTRA_LIBRARY_DIRS "" CACHE STRING
   "Additional library directories to search when creating portable packages")
-mark_as_advanced(Mapper_PACKAGE_EXTRA_LIBRARY_DIRS)
+mark_as_advanced(Mapper_PACKAGE_FILE_ASSOCIATIONS Mapper_PACKAGE_EXTRA_LIBRARY_DIRS)
 
 function(deploy_qt_translations basename)
 	find_package(Qt5LinguistTools REQUIRED QUIET) # for Qt5::lconvert
@@ -167,8 +168,10 @@ if(WIN32)
 		configure_file(windows/custom.nsi.in windows/custom.nsi @ONLY)
 		set(CPACK_NSIS_DEFINES "!include \\\"${CMAKE_CURRENT_BINARY_DIR}\\\\windows\\\\custom.nsi\\\"")
 		# Extra NSIS commands that will be added to the install/uninstall sections.
-		set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS   "Call installAssociations")
-		set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS "Call un.installAssociations")
+		if(Mapper_PACKAGE_FILE_ASSOCIATIONS)
+			set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS   "Call installAssociations")
+			set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS "Call un.installAssociations")
+		endif()
 		# 64 bit build
 		if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 			set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")

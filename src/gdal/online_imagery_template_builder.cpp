@@ -144,7 +144,7 @@ OnlineImageryTemplateBuilder::classifyUrl(const QString& input)
 		return result;
 	}
 
-	result.error = tr("Couldn't recognize this imagery link. Supported: XYZ tile URLs ({z}/{x}/{y}) and ArcGIS MapServer links.");
+	result.error = tr("Couldn't recognize this imagery link. Supported: top-origin Web Mercator XYZ tile URLs ({z}/{x}/{y}) and standard cached Web Mercator ArcGIS MapServer links.");
 	return result;
 }
 

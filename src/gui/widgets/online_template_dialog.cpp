@@ -86,7 +86,7 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 
 	auto* layout = new QVBoxLayout(this);
 
-	auto* chooser_label = new QLabel(tr("Presets / recent:"), this);
+	auto* chooser_label = new QLabel(tr("Recent sources:"), this);
 	layout->addWidget(chooser_label);
 
 	source_chooser = new QComboBox(this);
@@ -97,7 +97,7 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 	        this,
 	        &OnlineTemplateDialog::onSourceChosen);
 
-	auto* url_label = new QLabel(tr("Imagery Link (XYZ/TMS or ArcGIS MapServer):"), this);
+	auto* url_label = new QLabel(tr("Imagery Link (tile URL or ArcGIS MapServer):"), this);
 	layout->addWidget(url_label);
 
 	url_edit = new QLineEdit(this);
@@ -262,22 +262,7 @@ void OnlineTemplateDialog::generateAndAccept()
 void OnlineTemplateDialog::populateSourceChooser()
 {
 	source_chooser->clear();
-	source_chooser->addItem(tr("Choose a preset or recent source"));
-
-	source_chooser->insertSeparator(source_chooser->count());
-	auto osm_index = source_chooser->count();
-	source_chooser->addItem(tr("OpenStreetMap"));
-	source_chooser->setItemData(osm_index,
-	                            QStringLiteral("https://tile.openstreetmap.org/{z}/{x}/{y}.png"),
-	                            source_url_role);
-	source_chooser->setItemData(osm_index, tr("OpenStreetMap"), source_name_role);
-
-	auto esri_index = source_chooser->count();
-	source_chooser->addItem(tr("Esri World Imagery"));
-	source_chooser->setItemData(esri_index,
-	                            QStringLiteral("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"),
-	                            source_url_role);
-	source_chooser->setItemData(esri_index, tr("Esri World Imagery"), source_name_role);
+	source_chooser->addItem(tr("Choose a recent source"));
 
 	QSettings settings;
 	auto recent_urls = settings.value(QStringLiteral("onlineImagery/recentUrls")).toStringList();
