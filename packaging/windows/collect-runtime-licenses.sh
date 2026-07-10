@@ -24,7 +24,8 @@ if [[ ! -d $staged_tree || ! -s $gdal_license ]]; then
 fi
 
 owners_file=$(mktemp)
-trap 'rm -f "$owners_file"' EXIT
+missing_owners_file=$(mktemp)
+trap 'rm -f "$owners_file" "$missing_owners_file"' EXIT
 
 while IFS= read -r -d '' dll; do
 	basename=$(basename "$dll")
@@ -83,8 +84,8 @@ mkdir -p "$(dirname "$output")"
 					 }'
 		)
 		if [[ ${#license_files[@]} -eq 0 ]]; then
-			echo "no packaged license files for $owner" >&2
-			exit 1
+			printf '%s\n' "$owner" >> "$missing_owners_file"
+			continue
 		fi
 
 		echo
@@ -95,6 +96,16 @@ mkdir -p "$(dirname "$output")"
 			cat "$license_file"
 		done
 	done < "$owners_file"
+
+	if [[ -s $missing_owners_file ]]; then
+		echo "packages without owned license files:" >&2
+		while IFS= read -r owner; do
+			printf '  %s (licenses: %s)\n' \
+				"$owner" \
+				"$(pacman -Qi "$owner" | awk -F ': ' '/^Licenses[[:space:]]*:/ { print $2 }')" >&2
+		done < "$missing_owners_file"
+		exit 1
+	fi
 } > "$output"
 
 test -s "$output"
