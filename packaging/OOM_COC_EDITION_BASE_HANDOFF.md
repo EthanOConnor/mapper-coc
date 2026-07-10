@@ -40,6 +40,8 @@ intended for the class must be validated manually.
       SHA-256 digests, signing status, branch, commit, and Actions run URL.
 - [ ] Required third-party notices and licenses are present; the installed
       `licensing.html` contains no missing-provider redistribution warning.
+- [ ] Review non-DLL payloads such as Qt translations and data files. The
+      automated runtime-bundle collector derives notices from DLL owners only.
 
 ## Exact Windows candidate
 
@@ -69,6 +71,10 @@ run.
 
 ## Clean-machine acceptance
 
+- [ ] If `0.9.7-COC.3` is installed, uninstall it with its own uninstaller
+      before installing `0.9.7-COC.4`; record the existing official Mapper
+      file associations first. The COC.4 uninstaller intentionally does not
+      invoke the older shared-association cleanup code.
 - [ ] Use the exact installer named above on a clean Windows machine.
 - [ ] Record the expected SmartScreen/unknown-publisher flow if unsigned.
 - [ ] Confirm installation and first startup.

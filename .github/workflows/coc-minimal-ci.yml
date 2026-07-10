@@ -431,7 +431,7 @@ jobs:
           test -f "$DIST_DIR/doc/licensing.html"
           test -s "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
           ! grep -q 'without an external provider' "$DIST_DIR/doc/licensing.html"
-          grep -q 'GDAL 3.11.5' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
+          grep -q "GDAL $GDAL_VERSION" "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
           grep -q 'mingw-w64-x86_64-curl-winssl ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
           grep -q 'mingw-w64-x86_64-gcc-libs ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
           grep -q 'mingw-w64-x86_64-proj ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
@@ -523,6 +523,7 @@ jobs:
           test -s "$target"
 
       - name: Smoke test Windows installer
+        id: installer_smoke_test
         shell: powershell
         run: |
           $installer = Get-ChildItem `
@@ -613,6 +614,9 @@ jobs:
 
       - name: Write release artifact manifest
         shell: powershell
+        env:
+          PORTABLE_SMOKE_OUTCOME: ${{ steps.smoke_test.outcome }}
+          INSTALLER_SMOKE_OUTCOME: ${{ steps.installer_smoke_test.outcome }}
         run: |
           $distDir = Join-Path $env:GITHUB_WORKSPACE "dist"
           $artifacts = foreach ($file in Get-ChildItem -Path $distDir -File | Where-Object { $_.Extension -in @(".exe", ".zip") }) {
@@ -621,12 +625,20 @@ jobs:
             } else {
               "NotApplicable"
             }
+            $smokeOutcome = if ($file.Extension -eq ".exe") {
+              $env:INSTALLER_SMOKE_OUTCOME
+            } else {
+              $env:PORTABLE_SMOKE_OUTCOME
+            }
+            if ($smokeOutcome -ne "success") {
+              throw "Refusing to publish a manifest with smoke outcome '$smokeOutcome' for $($file.Name)."
+            }
             [ordered]@{
               name = $file.Name
               bytes = $file.Length
               sha256 = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
               signingStatus = $signingStatus
-              smokeTest = "passed"
+              smokeTest = $smokeOutcome
             }
           }
 

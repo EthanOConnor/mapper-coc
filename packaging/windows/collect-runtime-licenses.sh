@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-# Build an aggregate notice from the exact DLL closure staged for Windows.
-# MSYS2 owns every packaged runtime DLL except the locally built GDAL library.
+# Build an aggregate notice from the DLL closure staged for Windows. MSYS2
+# owns every packaged runtime DLL except the locally built GDAL library.
+# Non-DLL payloads such as translations and data files remain a separate
+# handoff-review responsibility.
 
 set -euo pipefail
 

@@ -97,10 +97,7 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 	        this,
 	        &OnlineTemplateDialog::onSourceChosen);
 
-	auto* url_label = new QLabel(
-		tr("Imagery Link (top-origin XYZ or cached Web Mercator ArcGIS MapServer):"),
-		this);
-	url_label->setWordWrap(true);
+	auto* url_label = new QLabel(tr("Imagery Link (tile URL or ArcGIS MapServer):"), this);
 	layout->addWidget(url_label);
 
 	url_edit = new QLineEdit(this);
