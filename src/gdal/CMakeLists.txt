@@ -25,6 +25,7 @@ set(CMAKE_AUTOMOC ON)
 # Extra header to be shown in the IDE or to be translated
 set(MAPPER_GDAL_HEADERS
   imagery_catalog.h
+  imagery_catalog_reader.h
   ogr_file_format_p.h
   online_imagery_source.h
 )
@@ -35,6 +36,7 @@ set(MAPPER_GDAL_SOURCES
   gdal_manager.cpp
   gdal_settings_page.cpp
   gdal_template.cpp
+  imagery_catalog_reader.cpp
   kmz_groundoverlay_export.cpp
   online_imagery_template_builder.cpp
   ogr_file_format.cpp

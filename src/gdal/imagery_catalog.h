@@ -34,6 +34,7 @@ struct TileMatrixDefinition
 	QSize tile_size;
 	qint64 matrix_width = 0;
 	qint64 matrix_height = 0;
+	bool has_variable_matrix_widths = false;
 };
 
 

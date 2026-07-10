@@ -1,0 +1,32 @@
+{
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.example.imagery.singular-affine",
+  "revision": 1,
+  "name": "Invalid affine fixture",
+  "sources": [
+    {
+      "id": "singular-affine",
+      "name": "Singular affine",
+      "type": "raster-tiles",
+      "tiles": ["https://tiles.example.test/{z}/{x}/{y}.png"],
+      "scheme": "xyz",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "registration": {
+        "direction": "source-to-corrected",
+        "sourceFrame": {"crs": "EPSG:3857"},
+        "targetFrame": {"crs": "EPSG:3857"},
+        "operation": {
+          "type": "affine2d",
+          "unit": "crs",
+          "xoff": 0,
+          "yoff": 0,
+          "s11": 1,
+          "s12": 2,
+          "s21": 2,
+          "s22": 4
+        }
+      }
+    }
+  ]
+}
