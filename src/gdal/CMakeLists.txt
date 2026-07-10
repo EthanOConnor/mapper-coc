@@ -26,6 +26,8 @@ set(CMAKE_AUTOMOC ON)
 set(MAPPER_GDAL_HEADERS
   imagery_catalog.h
   imagery_catalog_reader.h
+  imagery_json_canonicalizer.h
+  imagery_source_fingerprint.h
   ogr_file_format_p.h
   online_imagery_source.h
 )
@@ -37,6 +39,8 @@ set(MAPPER_GDAL_SOURCES
   gdal_settings_page.cpp
   gdal_template.cpp
   imagery_catalog_reader.cpp
+  imagery_json_canonicalizer.cpp
+  imagery_source_fingerprint.cpp
   kmz_groundoverlay_export.cpp
   online_imagery_template_builder.cpp
   ogr_file_format.cpp

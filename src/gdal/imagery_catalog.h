@@ -111,6 +111,8 @@ struct ImagerySourceDefinition
 	ImageryRegistration registration;
 	QStringList required_capabilities;
 	QStringList unsupported_capabilities;
+	QByteArray full_fingerprint;
+	QByteArray operational_fingerprint;
 	QJsonObject original_object;
 	bool valid = false;
 	bool supported = false;
@@ -134,6 +136,7 @@ struct ImageryCatalog
 	QJsonObject extensions;
 	QJsonObject original_object;
 	QByteArray original_bytes;
+	QByteArray document_sha256;
 };
 
 

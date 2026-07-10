@@ -25,6 +25,9 @@
 
 #include <proj.h>
 
+#include "imagery_json_canonicalizer.h"
+#include "imagery_source_fingerprint.h"
+
 namespace OpenOrienteering {
 
 namespace {
@@ -1541,6 +1544,7 @@ bool ImageryCatalogReadResult::hasCatalogErrors() const
 ImageryCatalogReadResult ImageryCatalogReader::read(const QByteArray& bytes)
 {
 	ImageryCatalogReadResult result;
+	result.catalog.document_sha256 = ImageryJsonCanonicalizer::sha256(bytes);
 	if (bytes.size() > max_document_size)
 	{
 		result.issues.push_back({ ImageryCatalogIssue::Type::CatalogError,
@@ -1575,6 +1579,22 @@ ImageryCatalogReadResult ImageryCatalogReader::read(const QByteArray& bytes)
 
 	CatalogValidator validator(result);
 	validator.validate(document.object(), bytes);
+	for (int i = result.catalog.sources.size() - 1; i >= 0; --i)
+	{
+		ImagerySourceFingerprints fingerprints;
+		QString error;
+		if (!ImagerySourceFingerprint::calculate(result.catalog.sources.at(i), &fingerprints, &error))
+		{
+			result.issues.push_back({ ImageryCatalogIssue::Type::SourceError,
+			                          QStringLiteral("$.sources"),
+			                          QStringLiteral("Unable to fingerprint source: %1").arg(error),
+			                          -1 });
+			result.catalog.sources.removeAt(i);
+			continue;
+		}
+		result.catalog.sources[i].full_fingerprint = fingerprints.full;
+		result.catalog.sources[i].operational_fingerprint = fingerprints.operational;
+	}
 	return result;
 }
 

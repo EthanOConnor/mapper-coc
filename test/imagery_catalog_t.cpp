@@ -20,6 +20,8 @@
 #include "test_config.h"
 
 #include "gdal/imagery_catalog_reader.h"
+#include "gdal/imagery_json_canonicalizer.h"
+#include "gdal/imagery_source_fingerprint.h"
 
 namespace OpenOrienteering {
 
@@ -113,6 +115,9 @@ private slots:
 		QCOMPARE(minimal.catalog.sources.first().format, QStringLiteral("image/png"));
 		QCOMPARE(minimal.catalog.sources.first().tile_matrix_set.crs, QStringLiteral("EPSG:3857"));
 		QCOMPARE(minimal.catalog.sources.first().tile_matrix_set.tile_matrices.size(), 25);
+		QCOMPARE(minimal.catalog.sources.first().full_fingerprint.size(), 64);
+		QCOMPARE(minimal.catalog.sources.first().operational_fingerprint.size(), 64);
+		QCOMPARE(minimal.catalog.document_sha256, ImageryJsonCanonicalizer::sha256(minimal_bytes));
 
 		auto const custom_bytes = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json"));
 		auto const custom = ImageryCatalogReader::read(custom_bytes);
@@ -128,6 +133,83 @@ private slots:
 		QCOMPARE(unsupported.catalog.sources.size(), 1);
 		QVERIFY(!unsupported.catalog.sources.first().supported);
 		QVERIFY(hasIssue(unsupported, ImageryCatalogIssue::Type::UnsupportedSource, QStringLiteral("nondyadic")));
+	}
+
+	void fingerprints()
+	{
+		auto const base_bytes = fixture(QStringLiteral("valid/minimal.oom-imagery.json"));
+		auto const base = ImageryCatalogReader::read(base_bytes);
+		QVERIFY(base.accepted());
+		auto const base_source = base.catalog.sources.first();
+		QCOMPARE(base_source.full_fingerprint,
+		         QByteArray("231ea73d1cb066e5d67a56981b25ed649279ad4aec79d1569bf2f591d6dedbf4"));
+		QCOMPARE(base_source.operational_fingerprint,
+		         QByteArray("f76f7b6b37eb68278ddc458cd72d1ebd40d23b7b5e8e1e4fa3edf3d5dfe46ed5"));
+
+		auto aliases = ImageryCatalogReader::read(changedSource([](QJsonObject& source) {
+			source.insert(QStringLiteral("tiles"), QJsonArray {
+				QStringLiteral("HTTPS://TILES.EXAMPLE.TEST:443/aerial/${z}/${x}/${y}.png")
+			});
+		}));
+		QVERIFY(aliases.accepted());
+		QCOMPARE(aliases.catalog.sources.first().full_fingerprint, base_source.full_fingerprint);
+		QCOMPARE(aliases.catalog.sources.first().operational_fingerprint, base_source.operational_fingerprint);
+
+		auto inline_matrix = ImageryCatalogReader::read(changedSource([](QJsonObject& source) {
+			source.remove(QStringLiteral("tileMatrixSetURI"));
+			source.insert(QStringLiteral("tileMatrixSet"), ImageryCatalogReader::webMercatorQuad().original_object);
+		}));
+		QVERIFY(inline_matrix.accepted());
+		QCOMPARE(inline_matrix.catalog.sources.first().full_fingerprint, base_source.full_fingerprint);
+		QCOMPARE(inline_matrix.catalog.sources.first().operational_fingerprint, base_source.operational_fingerprint);
+
+		auto descriptive = ImageryCatalogReader::read(changedSource([](QJsonObject& source) {
+			source.insert(QStringLiteral("name"), QStringLiteral("Renamed source"));
+			source.insert(QStringLiteral("notices"), QJsonObject {
+				{ QStringLiteral("attributionText"), QStringLiteral("New attribution") }
+			});
+		}));
+		QVERIFY(descriptive.accepted());
+		QVERIFY(descriptive.catalog.sources.first().full_fingerprint != base_source.full_fingerprint);
+		QCOMPARE(descriptive.catalog.sources.first().operational_fingerprint, base_source.operational_fingerprint);
+
+		auto operational = ImageryCatalogReader::read(changedSource([](QJsonObject& source) {
+			source.insert(QStringLiteral("tiles"), QJsonArray {
+				QStringLiteral("https://other.example.test/aerial/{z}/{x}/{y}.png")
+			});
+		}));
+		QVERIFY(operational.accepted());
+		QVERIFY(operational.catalog.sources.first().full_fingerprint != base_source.full_fingerprint);
+		QVERIFY(operational.catalog.sources.first().operational_fingerprint != base_source.operational_fingerprint);
+
+		auto registered = ImageryCatalogReader::read(changedSource([](QJsonObject& source) {
+			source.insert(QStringLiteral("registration"), translationRegistration());
+		}));
+		QVERIFY(registered.accepted());
+		QVERIFY(registered.catalog.sources.first().full_fingerprint != base_source.full_fingerprint);
+		QVERIFY(registered.catalog.sources.first().operational_fingerprint != base_source.operational_fingerprint);
+
+		auto reordered_document = QJsonDocument(minimalCatalogObject()).toJson(QJsonDocument::Compact);
+		auto reordered = ImageryCatalogReader::read(reordered_document);
+		QVERIFY(reordered.accepted());
+		QCOMPARE(reordered.catalog.sources.first().full_fingerprint, base_source.full_fingerprint);
+		QCOMPARE(reordered.catalog.sources.first().operational_fingerprint, base_source.operational_fingerprint);
+		QVERIFY(reordered.catalog.document_sha256 != base.catalog.document_sha256);
+	}
+
+	void numericFingerprintEquivalence()
+	{
+		auto first_bytes = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json"));
+		auto second_bytes = first_bytes;
+		QVERIFY(second_bytes.contains("-0.42"));
+		second_bytes.replace("-0.42", "-4.2e-1");
+		auto const first = ImageryCatalogReader::read(first_bytes);
+		auto const second = ImageryCatalogReader::read(second_bytes);
+		QVERIFY(first.accepted());
+		QVERIFY(second.accepted());
+		QCOMPARE(first.catalog.sources.first().full_fingerprint, second.catalog.sources.first().full_fingerprint);
+		QCOMPARE(first.catalog.sources.first().operational_fingerprint, second.catalog.sources.first().operational_fingerprint);
+		QVERIFY(first.catalog.document_sha256 != second.catalog.document_sha256);
 	}
 
 	void invalidFixtures()
