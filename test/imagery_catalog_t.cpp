@@ -16,10 +16,12 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryDir>
 
 #include "test_config.h"
 
 #include "gdal/imagery_catalog_reader.h"
+#include "gdal/imagery_catalog_store.h"
 #include "gdal/imagery_json_canonicalizer.h"
 #include "gdal/imagery_source_fingerprint.h"
 #include "gdal/imagery_source_resolver.h"
@@ -227,6 +229,81 @@ private slots:
 		auto const unsupported = ImageryCatalogReader::read(fixture(QStringLiteral("unsupported/non-dyadic-matrix-set.oom-imagery.json")));
 		QVERIFY(unsupported.accepted());
 		QVERIFY(!ImagerySourceResolver::resolve(unsupported.catalog.sources.first()).error.isEmpty());
+	}
+
+	void catalogStore()
+	{
+		QTemporaryDir directory;
+		QVERIFY(directory.isValid());
+		ImageryCatalogStore store(directory.filePath(QStringLiteral("catalog-store")));
+		auto const bytes = fixture(QStringLiteral("valid/minimal.oom-imagery.json"));
+		auto const catalog = ImageryCatalogReader::read(bytes);
+		QVERIFY(catalog.accepted());
+		QString error;
+		QVERIFY2(store.install(catalog, QStringLiteral("https://example.test/catalog"), QByteArray("etag-1"), QByteArray("yesterday"), &error), qPrintable(error));
+		auto installed = store.catalogs(&error);
+		QCOMPARE(installed.size(), 1);
+		QCOMPARE(installed.first().read_result.catalog.original_bytes, bytes);
+		QCOMPARE(installed.first().state.origin, QStringLiteral("https://example.test/catalog"));
+		QCOMPARE(installed.first().state.etag, QByteArray("etag-1"));
+		QCOMPARE(installed.first().state.last_modified, QByteArray("yesterday"));
+		QVERIFY(installed.first().state.installed_at.isValid());
+		QVERIFY(!store.directoryKey(QStringLiteral("../../unsafe catalog")).contains(QLatin1Char('/')));
+
+		auto exact = store.analyze(catalog, &error);
+		QCOMPARE(exact.update_kind, ImageryCatalogAnalysis::UpdateKind::ExactReimport);
+		QCOMPARE(exact.added, 0);
+		QCOMPARE(exact.changed, 0);
+		QCOMPARE(exact.removed, 0);
+
+		auto higher = ImageryCatalogReader::read(changedCatalog([](QJsonObject& object) { object.insert(QStringLiteral("revision"), 2); }));
+		QCOMPARE(store.analyze(higher).update_kind, ImageryCatalogAnalysis::UpdateKind::HigherRevision);
+		auto same_revision = ImageryCatalogReader::read(changedCatalog([](QJsonObject& object) { object.insert(QStringLiteral("description"), QStringLiteral("Republished")); }));
+		QCOMPARE(store.analyze(same_revision).update_kind, ImageryCatalogAnalysis::UpdateKind::SameRevisionConflict);
+		QVERIFY(store.install(higher, QStringLiteral("local"), {}, {}, &error));
+		QCOMPARE(store.analyze(catalog).update_kind, ImageryCatalogAnalysis::UpdateKind::LowerRevision);
+
+		auto duplicate = ImageryCatalogReader::read(changedCatalog([](QJsonObject& object) {
+			object.insert(QStringLiteral("id"), QStringLiteral("org.example.imagery.duplicate-catalog"));
+		}));
+		QCOMPARE(store.analyze(duplicate).exact_duplicates, 1);
+		QVERIFY(store.install(duplicate, QStringLiteral("local"), {}, {}, &error));
+
+		auto potential = ImageryCatalogReader::read(changedCatalog([](QJsonObject& object) {
+			object.insert(QStringLiteral("id"), QStringLiteral("org.example.imagery.potential-catalog"));
+			auto sources = object.value(QStringLiteral("sources")).toArray();
+			auto source = sources.first().toObject();
+			source.insert(QStringLiteral("name"), QStringLiteral("Different description"));
+			sources.replace(0, source);
+			object.insert(QStringLiteral("sources"), sources);
+		}));
+		QCOMPARE(store.analyze(potential).potential_duplicates, 2);
+
+		QFile generated(directory.filePath(QStringLiteral("generated-template.xml")));
+		QVERIFY(generated.open(QIODevice::WriteOnly));
+		generated.write("keep");
+		generated.close();
+		QVERIFY(store.remove(catalog.catalog.id, &error));
+		QVERIFY(generated.exists());
+		QCOMPARE(store.catalogs().size(), 1);
+	}
+
+	void catalogStoreWriteFailure()
+	{
+		QTemporaryDir directory;
+		QVERIFY(directory.isValid());
+		auto const root_file = directory.filePath(QStringLiteral("not-a-directory"));
+		QFile file(root_file);
+		QVERIFY(file.open(QIODevice::WriteOnly));
+		file.write("sentinel");
+		file.close();
+		ImageryCatalogStore store(root_file);
+		auto const catalog = ImageryCatalogReader::read(fixture(QStringLiteral("valid/minimal.oom-imagery.json")));
+		QString error;
+		QVERIFY(!store.install(catalog, QStringLiteral("local"), {}, {}, &error));
+		QVERIFY(!error.isEmpty());
+		QVERIFY(file.open(QIODevice::ReadOnly));
+		QCOMPARE(file.readAll(), QByteArray("sentinel"));
 	}
 
 	void invalidFixtures()

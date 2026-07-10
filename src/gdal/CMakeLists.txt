@@ -26,6 +26,7 @@ set(CMAKE_AUTOMOC ON)
 set(MAPPER_GDAL_HEADERS
   imagery_catalog.h
   imagery_catalog_reader.h
+  imagery_catalog_store.h
   imagery_json_canonicalizer.h
   imagery_source_fingerprint.h
   imagery_source_resolver.h
@@ -40,6 +41,7 @@ set(MAPPER_GDAL_SOURCES
   gdal_settings_page.cpp
   gdal_template.cpp
   imagery_catalog_reader.cpp
+  imagery_catalog_store.cpp
   imagery_json_canonicalizer.cpp
   imagery_source_fingerprint.cpp
   imagery_source_resolver.cpp

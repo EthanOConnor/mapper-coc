@@ -172,6 +172,7 @@ add_unit_test(georeferencing_t ../src/core/georeferencing
 if (Mapper_USE_GDAL)
 	add_unit_test(imagery_catalog_t
 		../src/gdal/imagery_catalog_reader
+		../src/gdal/imagery_catalog_store
 		../src/gdal/imagery_json_canonicalizer
 		../src/gdal/imagery_source_fingerprint
 		../src/gdal/imagery_source_resolver
