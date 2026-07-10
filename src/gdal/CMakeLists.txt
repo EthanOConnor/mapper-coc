@@ -24,6 +24,7 @@ set(CMAKE_AUTOMOC ON)
  
 # Extra header to be shown in the IDE or to be translated
 set(MAPPER_GDAL_HEADERS
+  imagery_catalog.h
   ogr_file_format_p.h
   online_imagery_source.h
 )
