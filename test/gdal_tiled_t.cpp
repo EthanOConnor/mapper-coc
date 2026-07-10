@@ -27,6 +27,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLineEdit>
 #include <QRadioButton>
 #include <QSettings>
@@ -370,6 +373,45 @@ private slots:
 		auto installed = store.catalogs(&error);
 		QCOMPARE(installed.size(), 1);
 		QCOMPARE(installed.first().state.origin, QUrl::fromLocalFile(catalog_path).toString());
+		auto const original_fingerprint = installed.first().read_result.catalog.sources.first().operational_fingerprint;
+
+		QFile catalog_file(catalog_path);
+		QVERIFY(catalog_file.open(QIODevice::ReadOnly));
+		auto catalog_object = QJsonDocument::fromJson(catalog_file.readAll()).object();
+		catalog_object.insert(QStringLiteral("revision"), 2);
+		auto sources = catalog_object.value(QStringLiteral("sources")).toArray();
+		auto changed_source = sources.first().toObject();
+		changed_source.insert(QStringLiteral("name"), QStringLiteral("Updated aerial"));
+		changed_source.insert(
+			QStringLiteral("tiles"),
+			QJsonArray { QStringLiteral("https://tiles.example.test/updated/{z}/{x}/{y}.png") });
+		sources.replace(0, changed_source);
+		catalog_object.insert(QStringLiteral("sources"), sources);
+		auto const changed_bytes = QJsonDocument(catalog_object).toJson(QJsonDocument::Indented);
+		auto const changed_path = writeTextFile(
+			directory.filePath(QStringLiteral("changed-catalog.oic")),
+			changed_bytes);
+		QVERIFY(!changed_path.isEmpty());
+		auto const changed_catalog = ImageryCatalogReader::read(changed_bytes);
+		QVERIFY(changed_catalog.accepted());
+		auto const changed_fingerprint = changed_catalog.catalog.sources.first().operational_fingerprint;
+		QVERIFY(changed_fingerprint != original_fingerprint);
+
+		QVERIFY(QMetaObject::invokeMethod(
+			&dialog,
+			"importCatalogFile",
+			Qt::DirectConnection,
+			Q_ARG(QString, changed_path),
+			Q_ARG(QString, store_root)));
+		QCOMPARE(chooser->count(), 3);
+		QCOMPARE(chooser->itemText(2), QStringLiteral("Updated aerial"));
+		QCOMPARE(chooser->currentIndex(), 2);
+		QCOMPARE(url_edit->text(), QStringLiteral("https://tiles.example.test/updated/{z}/{x}/{y}.png"));
+
+		installed = store.catalogs(&error);
+		QCOMPARE(installed.size(), 1);
+		QCOMPARE(installed.first().read_result.catalog.sources.first().operational_fingerprint,
+		         changed_fingerprint);
 
 		auto* current_view = dialog.findChild<QRadioButton*>(QStringLiteral("current_view_coverage"));
 		QVERIFY(current_view);
@@ -379,8 +421,14 @@ private slots:
 		QFile generated(dialog.generatedPath());
 		QVERIFY(generated.open(QIODevice::ReadOnly));
 		auto const generated_xml = generated.readAll();
-		QVERIFY(generated_xml.contains("https://tiles.example.test/aerial/${z}/${x}/${y}.png"));
+		QVERIFY(generated_xml.contains("https://tiles.example.test/updated/${z}/${x}/${y}.png"));
+		QVERIFY(generated_xml.contains(changed_fingerprint));
+		QVERIFY(!generated_xml.contains(original_fingerprint));
 		QVERIFY(generated_xml.contains("<ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>"));
+		QPoint generated_origin;
+		QVERIFY(GdalTemplate::readTmsTileOrigin(dialog.generatedPath(), &generated_origin));
+		QCOMPARE(generated_origin.x() % 64, 0);
+		QCOMPARE(generated_origin.y() % 64, 0);
 
 		QVERIFY2(store.remove(QStringLiteral("org.example.imagery.minimal"), &error), qPrintable(error));
 	}
