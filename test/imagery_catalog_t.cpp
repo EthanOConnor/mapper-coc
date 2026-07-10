@@ -140,6 +140,18 @@ private slots:
 		QVERIFY(hasIssue(unsupported, ImageryCatalogIssue::Type::UnsupportedSource, QStringLiteral("nondyadic")));
 	}
 
+	void pugetSoundExampleValidates()
+	{
+		QFile file(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR) + QStringLiteral("/../examples/puget-sound.oic"));
+		QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
+		auto const example = ImageryCatalogReader::read(file.readAll());
+		QVERIFY2(example.issues.isEmpty(), qPrintable(example.issues.isEmpty() ? QString{} : example.issues.first().message));
+		QVERIFY(example.accepted());
+		QCOMPARE(example.catalog.sources.size(), 5);
+		for (auto const& source : example.catalog.sources)
+			QVERIFY(source.supported);
+	}
+
 	void fingerprints()
 	{
 		auto const base_bytes = fixture(QStringLiteral("valid/minimal.oic"));
