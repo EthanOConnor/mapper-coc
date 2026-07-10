@@ -12,7 +12,9 @@
 #include <functional>
 
 #include <QtTest>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -41,7 +43,7 @@ QByteArray fixture(const QString& relative_path)
 
 QJsonObject minimalCatalogObject()
 {
-	return QJsonDocument::fromJson(fixture(QStringLiteral("valid/minimal.oom-imagery.json"))).object();
+	return QJsonDocument::fromJson(fixture(QStringLiteral("valid/minimal.oic"))).object();
 }
 
 
@@ -107,7 +109,7 @@ class ImageryCatalogTest : public QObject
 private slots:
 	void validFixtures()
 	{
-		auto const minimal_bytes = fixture(QStringLiteral("valid/minimal.oom-imagery.json"));
+		auto const minimal_bytes = fixture(QStringLiteral("valid/minimal.oic"));
 		QVERIFY(!minimal_bytes.isEmpty());
 		auto const minimal = ImageryCatalogReader::read(minimal_bytes);
 		QVERIFY2(minimal.accepted(), qPrintable(minimal.issues.isEmpty() ? QString{} : minimal.issues.first().message));
@@ -122,7 +124,7 @@ private slots:
 		QCOMPARE(minimal.catalog.sources.first().operational_fingerprint.size(), 64);
 		QCOMPARE(minimal.catalog.document_sha256, ImageryJsonCanonicalizer::sha256(minimal_bytes));
 
-		auto const custom_bytes = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json"));
+		auto const custom_bytes = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oic"));
 		auto const custom = ImageryCatalogReader::read(custom_bytes);
 		QVERIFY2(custom.accepted(), qPrintable(custom.issues.isEmpty() ? QString{} : custom.issues.first().message));
 		QCOMPARE(custom.catalog.original_bytes, custom_bytes);
@@ -131,7 +133,7 @@ private slots:
 		QCOMPARE(custom.catalog.sources.first().request.empty_http_status_codes, QVector<int>({ 204, 404 }));
 		QCOMPARE(custom.catalog.sources.first().registration.operation_type, ImageryRegistration::OperationType::Translation2d);
 
-		auto const unsupported = ImageryCatalogReader::read(fixture(QStringLiteral("unsupported/non-dyadic-matrix-set.oom-imagery.json")));
+		auto const unsupported = ImageryCatalogReader::read(fixture(QStringLiteral("unsupported/non-dyadic-matrix-set.oic")));
 		QVERIFY(unsupported.accepted());
 		QCOMPARE(unsupported.catalog.sources.size(), 1);
 		QVERIFY(!unsupported.catalog.sources.first().supported);
@@ -140,7 +142,7 @@ private slots:
 
 	void fingerprints()
 	{
-		auto const base_bytes = fixture(QStringLiteral("valid/minimal.oom-imagery.json"));
+		auto const base_bytes = fixture(QStringLiteral("valid/minimal.oic"));
 		auto const base = ImageryCatalogReader::read(base_bytes);
 		QVERIFY(base.accepted());
 		auto const base_source = base.catalog.sources.first();
@@ -202,7 +204,7 @@ private slots:
 
 	void numericFingerprintEquivalence()
 	{
-		auto first_bytes = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json"));
+		auto first_bytes = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oic"));
 		auto second_bytes = first_bytes;
 		QVERIFY(second_bytes.contains("-0.42"));
 		second_bytes.replace("-0.42", "-4.2e-1");
@@ -217,7 +219,7 @@ private slots:
 
 	void sourceResolution()
 	{
-		auto const valid = ImageryCatalogReader::read(fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json")));
+		auto const valid = ImageryCatalogReader::read(fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oic")));
 		QVERIFY(valid.accepted());
 		auto const resolved = ImagerySourceResolver::resolve(valid.catalog.sources.first());
 		QVERIFY2(resolved.error.isEmpty(), qPrintable(resolved.error));
@@ -226,7 +228,7 @@ private slots:
 		QCOMPARE(resolved.source.registration.operation_type, ImageryRegistration::OperationType::Translation2d);
 		QCOMPARE(resolved.source.operational_fingerprint, valid.catalog.sources.first().operational_fingerprint);
 
-		auto const unsupported = ImageryCatalogReader::read(fixture(QStringLiteral("unsupported/non-dyadic-matrix-set.oom-imagery.json")));
+		auto const unsupported = ImageryCatalogReader::read(fixture(QStringLiteral("unsupported/non-dyadic-matrix-set.oic")));
 		QVERIFY(unsupported.accepted());
 		QVERIFY(!ImagerySourceResolver::resolve(unsupported.catalog.sources.first()).error.isEmpty());
 	}
@@ -236,7 +238,7 @@ private slots:
 		QTemporaryDir directory;
 		QVERIFY(directory.isValid());
 		ImageryCatalogStore store(directory.filePath(QStringLiteral("catalog-store")));
-		auto const bytes = fixture(QStringLiteral("valid/minimal.oom-imagery.json"));
+		auto const bytes = fixture(QStringLiteral("valid/minimal.oic"));
 		auto const catalog = ImageryCatalogReader::read(bytes);
 		QVERIFY(catalog.accepted());
 		QString error;
@@ -248,6 +250,7 @@ private slots:
 		QCOMPARE(installed.first().state.etag, QByteArray("etag-1"));
 		QCOMPARE(installed.first().state.last_modified, QByteArray("yesterday"));
 		QVERIFY(installed.first().state.installed_at.isValid());
+		QVERIFY(QFileInfo(QDir(installed.first().directory).filePath(QStringLiteral("catalog.oic"))).isFile());
 		QVERIFY(!store.directoryKey(QStringLiteral("../../unsafe catalog")).contains(QLatin1Char('/')));
 
 		auto exact = store.analyze(catalog, &error);
@@ -298,7 +301,7 @@ private slots:
 		file.write("sentinel");
 		file.close();
 		ImageryCatalogStore store(root_file);
-		auto const catalog = ImageryCatalogReader::read(fixture(QStringLiteral("valid/minimal.oom-imagery.json")));
+		auto const catalog = ImageryCatalogReader::read(fixture(QStringLiteral("valid/minimal.oic")));
 		QString error;
 		QVERIFY(!store.install(catalog, QStringLiteral("local"), {}, {}, &error));
 		QVERIFY(!error.isEmpty());
@@ -309,9 +312,9 @@ private slots:
 	void invalidFixtures()
 	{
 		for (auto const& name : {
-		       QStringLiteral("duplicate-member.oom-imagery.json"),
-		       QStringLiteral("invalid-tile-url.oom-imagery.json"),
-		       QStringLiteral("singular-affine.oom-imagery.json") })
+		       QStringLiteral("duplicate-member.oic"),
+		       QStringLiteral("invalid-tile-url.oic"),
+		       QStringLiteral("singular-affine.oic") })
 		{
 			auto const bytes = fixture(QStringLiteral("invalid/") + name);
 			QVERIFY2(!bytes.isEmpty(), qPrintable(name));
@@ -524,7 +527,7 @@ private slots:
 
 	void matrixValidation()
 	{
-		auto out_of_bounds = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oom-imagery.json"));
+		auto out_of_bounds = fixture(QStringLiteral("valid/custom-dyadic-epsg2927.oic"));
 		auto object = QJsonDocument::fromJson(out_of_bounds).object();
 		auto sources = object.value(QStringLiteral("sources")).toArray();
 		auto source = sources.first().toObject();

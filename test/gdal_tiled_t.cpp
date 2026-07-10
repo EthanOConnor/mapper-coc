@@ -377,7 +377,7 @@ private slots:
 	void customImageryTileGridTest()
 	{
 		QFile fixture(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)
-		              + QStringLiteral("/data/imagery-catalogs/valid/custom-dyadic-epsg2927.oom-imagery.json"));
+		              + QStringLiteral("/data/imagery-catalogs/valid/custom-dyadic-epsg2927.oic"));
 		QVERIFY(fixture.open(QIODevice::ReadOnly));
 		auto const catalog = ImageryCatalogReader::read(fixture.readAll());
 		QVERIFY(catalog.accepted());

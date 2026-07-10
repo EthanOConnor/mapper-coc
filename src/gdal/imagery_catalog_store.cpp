@@ -83,7 +83,7 @@ InstalledImageryCatalog ImageryCatalogStore::loadDirectory(const QString& direct
 {
 	InstalledImageryCatalog installed;
 	installed.directory = directory;
-	QFile catalog_file(QDir(directory).filePath(QStringLiteral("catalog.json")));
+	QFile catalog_file(QDir(directory).filePath(QStringLiteral("catalog.") + ImageryCatalogReader::fileExtension()));
 	if (!catalog_file.open(QIODevice::ReadOnly))
 	{
 		if (error) *error = catalog_file.errorString();
@@ -209,7 +209,7 @@ bool ImageryCatalogStore::install(const ImageryCatalogReadResult& catalog,
 	auto const staging_path = QDir(root).filePath(QLatin1Char('.') + key + QStringLiteral(".tmp-") + QUuid::createUuid().toString(QUuid::Id128));
 	auto const backup_path = QDir(root).filePath(QLatin1Char('.') + key + QStringLiteral(".backup-") + QUuid::createUuid().toString(QUuid::Id128));
 	if (!QDir().mkpath(staging_path)
-	    || !save(QDir(staging_path).filePath(QStringLiteral("catalog.json")), catalog.catalog.original_bytes, error)
+	    || !save(QDir(staging_path).filePath(QStringLiteral("catalog.") + ImageryCatalogReader::fileExtension()), catalog.catalog.original_bytes, error)
 	    || !save(QDir(staging_path).filePath(QStringLiteral("state.json")), QJsonDocument(stateObject(catalog, origin, etag, last_modified)).toJson(QJsonDocument::Indented), error))
 	{
 		QDir(staging_path).removeRecursively();

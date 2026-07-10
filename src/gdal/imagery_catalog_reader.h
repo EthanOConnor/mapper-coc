@@ -59,6 +59,7 @@ public:
 	static constexpr int max_coverage_vertices = 10000;
 	static constexpr int max_empty_status_codes = 32;
 
+	static QString fileExtension();
 	static ImageryCatalogReadResult read(const QByteArray& bytes);
 	static TileMatrixSetDefinition webMercatorQuad();
 };

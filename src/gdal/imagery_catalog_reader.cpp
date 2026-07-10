@@ -1541,6 +1541,12 @@ bool ImageryCatalogReadResult::hasCatalogErrors() const
 }
 
 
+QString ImageryCatalogReader::fileExtension()
+{
+	return QStringLiteral("oic");
+}
+
+
 ImageryCatalogReadResult ImageryCatalogReader::read(const QByteArray& bytes)
 {
 	ImageryCatalogReadResult result;
