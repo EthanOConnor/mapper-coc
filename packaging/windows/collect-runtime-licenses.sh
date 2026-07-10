@@ -74,8 +74,13 @@ mkdir -p "$(dirname "$output")"
 			license_files+=("$license_file")
 		done < <(
 			pacman -Ql "$owner" |
-				awk -v prefix="$mingw_prefix/share/licenses/" \
-					'index($2, prefix) == 1 && $2 !~ /\/$/ { print $2 }'
+				awk \
+					-v licenses_prefix="$mingw_prefix/share/licenses/" \
+					-v share_prefix="$mingw_prefix/share/" \
+					'index($2, licenses_prefix) == 1 && $2 !~ /\/$/ ||
+					 (index($2, share_prefix) == 1 && $2 ~ /\/(LICENSE|COPYING)(\.[^\/]*)?$/) {
+						 print $2
+					 }'
 		)
 		if [[ ${#license_files[@]} -eq 0 ]]; then
 			echo "no packaged license files for $owner" >&2
