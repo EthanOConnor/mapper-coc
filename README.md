@@ -1,46 +1,15 @@
-# OpenOrienteering Mapper
+# OOM — COC Edition: Base
 
-![Mapper Screenshot](https://www.openorienteering.org/mapper-manual/pages/images/main_window.png)
+Version 0.9.7-COC.5.
 
-OpenOrienteering Mapper is an orienteering mapmaking program and provides
-a free and open source alternative to existing commercial software.
-OpenOrienteering Mapper runs on Android, Windows, macOS and Linux.
+A Windows preview build of OpenOrienteering Mapper with online imagery support.
 
- - [Mapper Homepage](https://www.openorienteering.org/apps/mapper/)
- - [Manual](https://www.openorienteering.org/mapper-manual/)
- - [Downloads](https://github.com/OpenOrienteering/mapper/releases)
- - [OpenOrienteering Blog](https://www.openorienteering.org/)
+[Download and setup](https://ethanoconnor.github.io/mapper-coc/)
 
+The site provides the installer, portable ZIP, release manifest, and Puget Sound imagery catalog.
 
-## Reporting Issues and Asking for Help
+Windows x64 only. The installer is unsigned. In Microsoft Defender SmartScreen, select **More info**, then **Run anyway**.
 
-Issues and possible improvements can be posted to our public [Ticket system](https://github.com/OpenOrienteering/mapper/issues).
-Please make sure you provide all relevant information about your problem or idea.
+For imagery, open **Templates > Online Imagery**. Paste a tile URL or import the `puget-sound.oic` catalog.
 
-
-## Contributing
-
-### Translating
-
-Translations can be edited online on [Weblate](https://hosted.weblate.org/projects/openorienteering/mapper/). You can register/login with your Github account. Find out more about translation in our [wiki](https://github.com/OpenOrienteering/mapper/wiki/Translation).
-
-
-### Writing Documentation
-
-The Mapper manual lives in its [own repository](https://github.com/OpenOrienteering/mapper-manual)
-which contains all information for you to get started.
-
-
-### Writing Code
-
-For building Mapper from source see [`INSTALL.md`](https://github.com/OpenOrienteering/mapper/blob/master/INSTALL.md).
-Pull requests are very welcome.
-
- - [Issue tracker](https://github.com/OpenOrienteering/mapper/issues)
- - [API documentation](https://www.openorienteering.org/api-docs/mapper/)
- - [Developer wiki](https://github.com/OpenOrienteering/mapper/wiki)
-
-
-## License
-
-Mapper is licensed under the [GNU GENERAL PUBLIC LICENSE Version 3](https://www.gnu.org/licenses/gpl.html).
+Built from [this repository](https://github.com/EthanOConnor/mapper-coc) under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html). Based on [OpenOrienteering Mapper](https://www.openorienteering.org) and its [source repository](https://github.com/OpenOrienteering/mapper).
