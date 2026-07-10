@@ -27,8 +27,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLineEdit>
+#include <QRadioButton>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
@@ -40,11 +43,13 @@
 #include "test_config.h"
 
 #include "global.h"
+#include "core/georeferencing.h"
 #include "core/map.h"
 #include "gdal/gdal_image_reader.h"
 #include "gdal/gdal_manager.h"
 #include "gdal/gdal_template.h"
 #include "gdal/imagery_catalog_reader.h"
+#include "gdal/imagery_catalog_store.h"
 #include "gdal/imagery_source_resolver.h"
 #include "gdal/online_imagery_template_builder.h"
 #include "gui/widgets/online_template_dialog.h"
@@ -287,7 +292,7 @@ private slots:
 		auto* empty_chooser = empty_dialog.findChild<QComboBox*>();
 		QVERIFY(empty_chooser);
 		QCOMPARE(empty_chooser->count(), 1);
-		QCOMPARE(empty_chooser->itemText(0), QStringLiteral("Choose a recent source"));
+		QCOMPARE(empty_chooser->itemText(0), QStringLiteral("Choose an imagery source"));
 
 		settings.setValue(
 			QStringLiteral("onlineImagery/recentUrls"),
@@ -303,6 +308,55 @@ private slots:
 		QCOMPARE(recent_chooser->itemText(2), QStringLiteral("Example imagery"));
 
 		settings.remove(QStringLiteral("onlineImagery"));
+	}
+
+	void onlineImageryCatalogImportTest()
+	{
+		QString const catalog_path = QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)
+		                             + QStringLiteral("/data/imagery-catalogs/valid/minimal.oic");
+		QTemporaryDir directory;
+		QVERIFY(directory.isValid());
+		auto const store_root = directory.filePath(QStringLiteral("catalog-store"));
+		ImageryCatalogStore store(store_root);
+		QString error;
+		Georeferencing georef;
+		QVERIFY(georef.setProjectedCRS(QStringLiteral("Web Mercator"), QStringLiteral("EPSG:3857")));
+		Map map;
+		map.setGeoreferencing(georef);
+		OnlineTemplateDialog dialog(
+			map,
+			directory.filePath(QStringLiteral("catalog-import.omap")),
+			QRectF(-1000, -1000, 2000, 2000));
+		QVERIFY(QMetaObject::invokeMethod(
+			&dialog,
+			"importCatalogFile",
+			Qt::DirectConnection,
+			Q_ARG(QString, catalog_path),
+			Q_ARG(QString, store_root)));
+
+		auto* chooser = dialog.findChild<QComboBox*>(QStringLiteral("source_chooser"));
+		QVERIFY(chooser);
+		QCOMPARE(chooser->count(), 3);
+		QCOMPARE(chooser->itemText(2), QStringLiteral("Minimal imagery catalog — Example aerial"));
+		QCOMPARE(chooser->currentIndex(), 2);
+		auto* url_edit = dialog.findChild<QLineEdit*>(QStringLiteral("imagery_url"));
+		QVERIFY(url_edit);
+		QCOMPARE(url_edit->text(), QStringLiteral("https://tiles.example.test/aerial/{z}/{x}/{y}.png"));
+
+		auto installed = store.catalogs(&error);
+		QCOMPARE(installed.size(), 1);
+		QCOMPARE(installed.first().state.origin, QUrl::fromLocalFile(catalog_path).toString());
+
+		auto* current_view = dialog.findChild<QRadioButton*>(QStringLiteral("current_view_coverage"));
+		QVERIFY(current_view);
+		current_view->setChecked(true);
+		QVERIFY(QMetaObject::invokeMethod(&dialog, "onAddClicked", Qt::DirectConnection));
+		QCOMPARE(dialog.result(), int(QDialog::Accepted));
+		QFile generated(dialog.generatedPath());
+		QVERIFY(generated.open(QIODevice::ReadOnly));
+		QVERIFY(generated.readAll().contains("https://tiles.example.test/aerial/${z}/${x}/${y}.png"));
+
+		QVERIFY2(store.remove(QStringLiteral("org.example.imagery.minimal"), &error), qPrintable(error));
 	}
 
 	void onlineImageryCoordinateMathTest()
