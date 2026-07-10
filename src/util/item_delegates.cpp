@@ -23,8 +23,10 @@
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QPainter>
+#include <QPainterPath>
 #include <QSignalMapper>
 #include <QSpinBox>
+#include <QStyle>
 #include <QTextDocument>
 
 #include "util/backports.h"  // IWYU pragma: keep
@@ -72,6 +74,78 @@ void ColorItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
 		painter->drawRect(option.rect.adjusted(1, 1, -2, -2));
 		painter->restore();
 	}
+}
+
+
+
+// ### CheckBoxItemDelegate ###
+
+void CheckBoxItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const
+{
+	QStyleOptionViewItem item_option(option);
+	initStyleOption(&item_option, index);
+	const auto check_state = static_cast<Qt::CheckState>(index.data(Qt::CheckStateRole).toInt());
+	const bool selected = item_option.state.testFlag(QStyle::State_Selected);
+	const auto color_group = item_option.state.testFlag(QStyle::State_Enabled) ?
+	                         item_option.palette.currentColorGroup() : QPalette::Disabled;
+
+	painter->save();
+	if (selected)
+		painter->fillRect(item_option.rect, item_option.palette.brush(color_group, QPalette::Highlight));
+	else if (item_option.backgroundBrush.style() != Qt::NoBrush)
+		painter->fillRect(item_option.rect, item_option.backgroundBrush);
+
+	const auto text_color = item_option.palette.color(
+	  color_group, selected ? QPalette::HighlightedText : QPalette::Text);
+	const int margin = qMax(2, item_option.fontMetrics.height() / 4);
+	const int side = qMin(item_option.fontMetrics.height(),
+	                      qMin(item_option.rect.width(), item_option.rect.height()) - 2 * margin);
+	if (side <= 2)
+	{
+		painter->restore();
+		return;
+	}
+
+	QRect indicator_rect(0, 0, side, side);
+	if (item_option.text.isEmpty())
+	{
+		indicator_rect.moveCenter(item_option.rect.center());
+	}
+	else
+	{
+		indicator_rect.moveCenter({item_option.rect.left() + margin + side / 2, item_option.rect.center().y()});
+		auto text_rect = item_option.rect.adjusted(2 * margin + side, 0, -margin, 0);
+		const auto text = item_option.fontMetrics.elidedText(item_option.text, item_option.textElideMode, text_rect.width());
+		painter->setPen(text_color);
+		painter->drawText(text_rect, int(item_option.displayAlignment), text);
+	}
+
+	painter->setRenderHint(QPainter::Antialiasing);
+	const qreal pen_width = qMax(1.0, side / 10.0);
+	const QRectF box = QRectF(indicator_rect).adjusted(pen_width / 2, pen_width / 2,
+	                                                  -pen_width / 2, -pen_width / 2);
+	const auto accent = item_option.palette.color(color_group, selected ? QPalette::HighlightedText : QPalette::Highlight);
+	const auto mark_color = item_option.palette.color(color_group, selected ? QPalette::Highlight : QPalette::HighlightedText);
+	painter->setPen(QPen(selected ? accent : text_color, pen_width));
+	painter->setBrush(check_state == Qt::Unchecked ? Qt::NoBrush : QBrush(accent));
+	painter->drawRoundedRect(box, side * 0.18, side * 0.18);
+
+	if (check_state == Qt::Checked)
+	{
+		QPainterPath mark;
+		mark.moveTo(box.left() + box.width() * 0.20, box.top() + box.height() * 0.52);
+		mark.lineTo(box.left() + box.width() * 0.42, box.top() + box.height() * 0.74);
+		mark.lineTo(box.left() + box.width() * 0.80, box.top() + box.height() * 0.28);
+		painter->setPen(QPen(mark_color, side * 0.13, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+		painter->drawPath(mark);
+	}
+	else if (check_state == Qt::PartiallyChecked)
+	{
+		painter->setPen(QPen(mark_color, side * 0.13, Qt::SolidLine, Qt::RoundCap));
+		painter->drawLine(box.left() + box.width() * 0.24, box.center().y(),
+		                  box.right() - box.width() * 0.24, box.center().y());
+	}
+	painter->restore();
 }
 
 

@@ -1,0 +1,45 @@
+{
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.example.imagery.non-dyadic",
+  "revision": 1,
+  "name": "Non-dyadic fixture",
+  "sources": [
+    {
+      "id": "non-dyadic",
+      "name": "Valid OGC non-dyadic pyramid",
+      "type": "raster-tiles",
+      "tiles": ["https://tiles.example.test/non-dyadic/{z}/{x}/{y}.png"],
+      "scheme": "xyz",
+      "tileMatrixSet": {
+        "id": "org.example.non-dyadic",
+        "crs": "EPSG:3857",
+        "orderedAxes": ["X", "Y"],
+        "tileMatrices": [
+          {
+            "id": "0",
+            "scaleDenominator": 1000000,
+            "cellSize": 280,
+            "pointOfOrigin": [0, 100000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 2,
+            "matrixHeight": 2
+          },
+          {
+            "id": "1",
+            "scaleDenominator": 400000,
+            "cellSize": 112,
+            "pointOfOrigin": [0, 100000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 5,
+            "matrixHeight": 5
+          }
+        ]
+      }
+    }
+  ]
+}

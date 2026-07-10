@@ -90,7 +90,9 @@ private:
 
 	static QPointF latLonToWebMercator(double lat_deg, double lon_deg);
 	static QRectF mapExtentToWebMercator(const QRectF& map_extent, const Georeferencing& georef);
+	static QRectF mapExtentToSource(const QRectF& map_extent, const Georeferencing& georef, const QString& crs, double tolerance);
 	static TileGridCrop snapToTileGrid(const QRectF& mercator_bbox, int max_tile_level, int tile_size);
+	static TileGridCrop snapToTileGrid(const QRectF& source_bbox, const OnlineImagerySource& source);
 };
 
 

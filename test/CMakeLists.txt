@@ -170,6 +170,14 @@ add_unit_test(georeferencing_t ../src/core/georeferencing
 	../src/core/map_coord
 )
 if (Mapper_USE_GDAL)
+	add_unit_test(imagery_catalog_t
+		../src/gdal/imagery_catalog_reader
+		../src/gdal/imagery_catalog_store
+		../src/gdal/imagery_json_canonicalizer
+		../src/gdal/imagery_source_fingerprint
+		../src/gdal/imagery_source_resolver
+	)
+	add_unit_test(imagery_json_canonicalizer_t ../src/gdal/imagery_json_canonicalizer)
 	# cf. src/gdal/CMakeLists.txt
 	target_compile_definitions(georeferencing_t PRIVATE MAPPER_TEST_GDAL)
 	target_include_directories(georeferencing_t SYSTEM PRIVATE ${GDAL_INCLUDE_DIRS})

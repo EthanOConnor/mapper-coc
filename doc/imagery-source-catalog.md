@@ -169,7 +169,7 @@ section 7.3 and capability-gates valid OGC matrix sets outside that profile.
 The GDAL WMTS driver is not a general escape hatch for plain XYZ endpoints: it
 selects matrix sets advertised by a WMTS GetCapabilities document.
 
-The initial filename suffix is `.oom-imagery.json`. The proposed media type is
+The filename extension is `.oic`. The proposed media type is
 `application/vnd.openorienteering.imagery-catalog+json`.
 That media type is unregistered and is only a useful content hint. Mapper
 dispatches on the required `format` and `version` members, never on a filename
@@ -845,14 +845,14 @@ User-installed catalog snapshots live below
 ```text
 imagery-catalogs/
   <safe catalog key>/
-    catalog.json
+    catalog.oic
     state.json
 ```
 
 The safe directory key is derived from the catalog ID rather than using the
 untrusted ID directly as a path.
 
-`catalog.json` is the exact installed snapshot. `state.json` records origin,
+`catalog.oic` is the exact installed snapshot. `state.json` records origin,
 install/fetch time, SHA-256, ETag, Last-Modified, and prior snapshot metadata
 needed for update reporting, together with fingerprint version and complete
 source digests used by the installed index. Writes use `QSaveFile` and atomic
@@ -947,10 +947,10 @@ src/gui/widgets/
 
 test/data/imagery-catalogs/
   valid/
-    custom-dyadic-epsg2927.oom-imagery.json
+    custom-dyadic-epsg2927.oic
   invalid/
   unsupported/
-    non-dyadic-matrix-set.oom-imagery.json
+    non-dyadic-matrix-set.oic
 
 doc/
   imagery-source-catalog.schema.json
@@ -1176,7 +1176,7 @@ Review should explicitly confirm or change:
 
 1. the custom JSON wrapper plus embedded OGC tile matrix set approach, with a
    dyadic first-renderer profile and capability-gated non-dyadic sets;
-2. `.oom-imagery.json` and the unregistered, non-dispatching media type hint;
+2. `.oic` and the unregistered, non-dispatching media type hint;
 3. a normative C++ validator, informative CI-checked JSON Schema, strict
    fields, and namespaced extensions;
 4. SHA-256 fingerprints over versioned RFC 8785 canonical normalized source

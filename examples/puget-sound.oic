@@ -1,0 +1,272 @@
+{
+  "format": "org.openorienteering.imagery-catalog",
+  "version": 1,
+  "id": "org.cascadeoc.mapper.imagery.puget-sound-example",
+  "revision": 2,
+  "name": "Puget Sound imagery example",
+  "description": "Real-world regional and global imagery sources for manual testing. This example is not installed as a Mapper preset.",
+  "created": "2026-07-09",
+  "updated": "2026-07-09",
+  "sources": [
+    {
+      "id": "king-county-aerial-2025",
+      "name": "King County Aerial 2025",
+      "type": "raster-tiles",
+      "tiles": [
+        "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2025/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "scheme": "xyz",
+      "format": "image/jpeg",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "20",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
+      "category": "aerial",
+      "notices": {
+        "sourceUrl": "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2025/MapServer"
+      }
+    },
+    {
+      "id": "king-county-aerial-2023",
+      "name": "King County Aerial 2023",
+      "type": "raster-tiles",
+      "tiles": [
+        "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2023/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "scheme": "xyz",
+      "format": "image/jpeg",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "20",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
+      "category": "aerial",
+      "notices": {
+        "sourceUrl": "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2023/MapServer"
+      }
+    },
+    {
+      "id": "pierce-county-ortho",
+      "name": "Pierce County Ortho",
+      "type": "raster-tiles",
+      "tiles": [
+        "https://matterhorntc.piercecountywa.gov/spatialservices/rest/services/Cache3/cartoOrtho/MapServer/tile/{z}/{y}/{x}?blankTile=false"
+      ],
+      "scheme": "xyz",
+      "format": "image/jpeg",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "10",
+      "tileMatrixSet": {
+        "id": "pierce-county-epsg2927",
+        "title": "Pierce County EPSG:2927 cached tile pyramid",
+        "crs": "EPSG:2927",
+        "orderedAxes": ["E", "N"],
+        "tileMatrices": [
+          {
+            "id": "0",
+            "scaleDenominator": 614400,
+            "cellSize": 533.3333333333333,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 5,
+            "matrixHeight": 5
+          },
+          {
+            "id": "1",
+            "scaleDenominator": 307200,
+            "cellSize": 266.66666666666663,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 10,
+            "matrixHeight": 10
+          },
+          {
+            "id": "2",
+            "scaleDenominator": 153600,
+            "cellSize": 133.33333333333331,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 20,
+            "matrixHeight": 20
+          },
+          {
+            "id": "3",
+            "scaleDenominator": 76800,
+            "cellSize": 66.66666666666666,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 40,
+            "matrixHeight": 40
+          },
+          {
+            "id": "4",
+            "scaleDenominator": 38400,
+            "cellSize": 33.33333333333333,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 80,
+            "matrixHeight": 80
+          },
+          {
+            "id": "5",
+            "scaleDenominator": 19200,
+            "cellSize": 16.666666666666664,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 160,
+            "matrixHeight": 160
+          },
+          {
+            "id": "6",
+            "scaleDenominator": 9600,
+            "cellSize": 8.333333333333332,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 320,
+            "matrixHeight": 320
+          },
+          {
+            "id": "7",
+            "scaleDenominator": 4800,
+            "cellSize": 4.166666666666666,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 640,
+            "matrixHeight": 640
+          },
+          {
+            "id": "8",
+            "scaleDenominator": 2400,
+            "cellSize": 2.083333333333333,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 1280,
+            "matrixHeight": 1280
+          },
+          {
+            "id": "9",
+            "scaleDenominator": 1200,
+            "cellSize": 1.0416666666666665,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 2560,
+            "matrixHeight": 2560
+          },
+          {
+            "id": "10",
+            "scaleDenominator": 600,
+            "cellSize": 0.5208333333333333,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 5120,
+            "matrixHeight": 5120
+          },
+          {
+            "id": "11",
+            "scaleDenominator": 300,
+            "cellSize": 0.26041666666666663,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 10240,
+            "matrixHeight": 10240
+          },
+          {
+            "id": "12",
+            "scaleDenominator": 150,
+            "cellSize": 0.13020833333333331,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 20480,
+            "matrixHeight": 20480
+          },
+          {
+            "id": "13",
+            "scaleDenominator": 75,
+            "cellSize": 0.06510416666666666,
+            "pointOfOrigin": [890000, 967000],
+            "cornerOfOrigin": "topLeft",
+            "tileWidth": 256,
+            "tileHeight": 256,
+            "matrixWidth": 40960,
+            "matrixHeight": 40960
+          }
+        ]
+      },
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
+      "category": "aerial",
+      "notices": {
+        "sourceUrl": "https://matterhorntc.piercecountywa.gov/spatialservices/rest/services/Cache3/cartoOrtho/MapServer"
+      }
+    },
+    {
+      "id": "esri-world-imagery",
+      "name": "Esri World Imagery",
+      "type": "raster-tiles",
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "scheme": "xyz",
+      "format": "image/jpeg",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "23",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
+      "category": "satellite",
+      "notices": {
+        "sourceUrl": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"
+      }
+    },
+    {
+      "id": "openstreetmap",
+      "name": "OpenStreetMap",
+      "type": "raster-tiles",
+      "tiles": [
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+      ],
+      "scheme": "xyz",
+      "format": "image/png",
+      "minTileMatrix": "10",
+      "maxTileMatrix": "19",
+      "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "category": "map",
+      "notices": {
+        "attributionText": "OpenStreetMap contributors",
+        "attributionUrl": "https://www.openstreetmap.org/copyright",
+        "sourceUrl": "https://tile.openstreetmap.org/"
+      }
+    }
+  ]
+}

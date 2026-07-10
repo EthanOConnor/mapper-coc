@@ -62,6 +62,8 @@ public:
 
 private slots:
 	void onAddClicked();
+	void onImportCatalogClicked();
+	void importCatalogFile(const QString& file_path, const QString& store_root = {});
 
 private:
 	void setStatus(const QString& message, const QColor& color, bool italic);
@@ -91,8 +93,11 @@ private:
 	QPushButton* add_button = nullptr;
 
 	OnlineImagerySource pending_source;
+	OnlineImagerySource selected_catalog_source;
 	QString generated_path;
 	QString source_name_hint;
+	QString catalog_store_root;
+	bool has_selected_catalog_source = false;
 };
 
 

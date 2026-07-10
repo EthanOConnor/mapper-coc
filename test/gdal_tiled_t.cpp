@@ -27,8 +27,14 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLineEdit>
+#include <QRadioButton>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
@@ -40,10 +46,14 @@
 #include "test_config.h"
 
 #include "global.h"
+#include "core/georeferencing.h"
 #include "core/map.h"
 #include "gdal/gdal_image_reader.h"
 #include "gdal/gdal_manager.h"
 #include "gdal/gdal_template.h"
+#include "gdal/imagery_catalog_reader.h"
+#include "gdal/imagery_catalog_store.h"
+#include "gdal/imagery_source_resolver.h"
 #include "gdal/online_imagery_template_builder.h"
 #include "gui/widgets/online_template_dialog.h"
 #include "templates/template.h"
@@ -285,7 +295,7 @@ private slots:
 		auto* empty_chooser = empty_dialog.findChild<QComboBox*>();
 		QVERIFY(empty_chooser);
 		QCOMPARE(empty_chooser->count(), 1);
-		QCOMPARE(empty_chooser->itemText(0), QStringLiteral("Choose a recent source"));
+		QCOMPARE(empty_chooser->itemText(0), QStringLiteral("Choose an imagery source"));
 
 		settings.setValue(
 			QStringLiteral("onlineImagery/recentUrls"),
@@ -301,6 +311,126 @@ private slots:
 		QCOMPARE(recent_chooser->itemText(2), QStringLiteral("Example imagery"));
 
 		settings.remove(QStringLiteral("onlineImagery"));
+	}
+
+	void onlineImageryManualSourcePlaceholderTest()
+	{
+		QTemporaryDir directory;
+		QVERIFY(directory.isValid());
+		auto const classified = OnlineImageryTemplateBuilder::classifyUrl(
+			QStringLiteral("https://tiles.example.test/{z}/{x}/{y}.png"));
+		QVERIFY(classified.error.isEmpty());
+		Georeferencing georef;
+		QVERIFY(georef.setProjectedCRS(QStringLiteral("Web Mercator"), QStringLiteral("EPSG:3857")));
+
+		auto const generated = OnlineImageryTemplateBuilder::generateXml(
+			classified.source,
+			QStringLiteral("Manual imagery"),
+			QRectF(-1000, -1000, 2000, 2000),
+			georef,
+			directory.filePath(QStringLiteral("manual.omap")));
+		QVERIFY2(generated.error.isEmpty(), qPrintable(generated.error));
+		QFile xml(generated.xml_path);
+		QVERIFY(xml.open(QIODevice::ReadOnly));
+		auto const contents = xml.readAll();
+		QVERIFY(contents.contains("https://tiles.example.test/${z}/${x}/${y}.png"));
+		QVERIFY(!contents.contains("$$"));
+	}
+
+	void onlineImageryCatalogImportTest()
+	{
+		QString const catalog_path = QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)
+		                             + QStringLiteral("/data/imagery-catalogs/valid/minimal.oic");
+		QTemporaryDir directory;
+		QVERIFY(directory.isValid());
+		auto const store_root = directory.filePath(QStringLiteral("catalog-store"));
+		ImageryCatalogStore store(store_root);
+		QString error;
+		Georeferencing georef;
+		QVERIFY(georef.setProjectedCRS(QStringLiteral("Web Mercator"), QStringLiteral("EPSG:3857")));
+		Map map;
+		map.setGeoreferencing(georef);
+		OnlineTemplateDialog dialog(
+			map,
+			directory.filePath(QStringLiteral("catalog-import.omap")),
+			QRectF(-1000, -1000, 2000, 2000));
+		QVERIFY(QMetaObject::invokeMethod(
+			&dialog,
+			"importCatalogFile",
+			Qt::DirectConnection,
+			Q_ARG(QString, catalog_path),
+			Q_ARG(QString, store_root)));
+
+		auto* chooser = dialog.findChild<QComboBox*>(QStringLiteral("source_chooser"));
+		QVERIFY(chooser);
+		QCOMPARE(chooser->count(), 3);
+		QCOMPARE(chooser->itemText(2), QStringLiteral("Example aerial"));
+		QCOMPARE(chooser->currentIndex(), 2);
+		auto* url_edit = dialog.findChild<QLineEdit*>(QStringLiteral("imagery_url"));
+		QVERIFY(url_edit);
+		QCOMPARE(url_edit->text(), QStringLiteral("https://tiles.example.test/aerial/{z}/{x}/{y}.png"));
+
+		auto installed = store.catalogs(&error);
+		QCOMPARE(installed.size(), 1);
+		QCOMPARE(installed.first().state.origin, QUrl::fromLocalFile(catalog_path).toString());
+		auto const original_fingerprint = installed.first().read_result.catalog.sources.first().operational_fingerprint;
+
+		QFile catalog_file(catalog_path);
+		QVERIFY(catalog_file.open(QIODevice::ReadOnly));
+		auto catalog_object = QJsonDocument::fromJson(catalog_file.readAll()).object();
+		catalog_object.insert(QStringLiteral("revision"), 2);
+		auto sources = catalog_object.value(QStringLiteral("sources")).toArray();
+		auto changed_source = sources.first().toObject();
+		changed_source.insert(QStringLiteral("name"), QStringLiteral("Updated aerial"));
+		changed_source.insert(
+			QStringLiteral("tiles"),
+			QJsonArray { QStringLiteral("https://tiles.example.test/updated/{z}/{x}/{y}.png") });
+		sources.replace(0, changed_source);
+		catalog_object.insert(QStringLiteral("sources"), sources);
+		auto const changed_bytes = QJsonDocument(catalog_object).toJson(QJsonDocument::Indented);
+		auto const changed_path = writeTextFile(
+			directory.filePath(QStringLiteral("changed-catalog.oic")),
+			changed_bytes);
+		QVERIFY(!changed_path.isEmpty());
+		auto const changed_catalog = ImageryCatalogReader::read(changed_bytes);
+		QVERIFY(changed_catalog.accepted());
+		auto const changed_fingerprint = changed_catalog.catalog.sources.first().operational_fingerprint;
+		QVERIFY(changed_fingerprint != original_fingerprint);
+
+		QVERIFY(QMetaObject::invokeMethod(
+			&dialog,
+			"importCatalogFile",
+			Qt::DirectConnection,
+			Q_ARG(QString, changed_path),
+			Q_ARG(QString, store_root)));
+		QCOMPARE(chooser->count(), 3);
+		QCOMPARE(chooser->itemText(2), QStringLiteral("Updated aerial"));
+		QCOMPARE(chooser->currentIndex(), 2);
+		QCOMPARE(url_edit->text(), QStringLiteral("https://tiles.example.test/updated/{z}/{x}/{y}.png"));
+
+		installed = store.catalogs(&error);
+		QCOMPARE(installed.size(), 1);
+		QCOMPARE(installed.first().read_result.catalog.sources.first().operational_fingerprint,
+		         changed_fingerprint);
+
+		auto* current_view = dialog.findChild<QRadioButton*>(QStringLiteral("current_view_coverage"));
+		QVERIFY(current_view);
+		current_view->setChecked(true);
+		QVERIFY(QMetaObject::invokeMethod(&dialog, "onAddClicked", Qt::DirectConnection));
+		QCOMPARE(dialog.result(), int(QDialog::Accepted));
+		QFile generated(dialog.generatedPath());
+		QVERIFY(generated.open(QIODevice::ReadOnly));
+		auto const generated_xml = generated.readAll();
+		QVERIFY(generated_xml.contains("https://tiles.example.test/updated/${z}/${x}/${y}.png"));
+		QVERIFY(generated_xml.contains(changed_fingerprint));
+		QVERIFY(!generated_xml.contains(original_fingerprint));
+		QVERIFY(generated_xml.contains("<ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>"));
+		QPoint generated_origin;
+		QVERIFY(GdalTemplate::readTmsTileOrigin(dialog.generatedPath(), &generated_origin));
+		QCOMPARE(generated_origin.x() % 64, 0);
+		QCOMPARE(generated_origin.y() % 64, 0);
+
+		QVERIFY2(store.remove(QStringLiteral("org.example.imagery.minimal"), &error), qPrintable(error));
 	}
 
 	void onlineImageryCoordinateMathTest()
@@ -361,6 +491,49 @@ private slots:
 			source,
 			QString{});
 		QVERIFY(QFileInfo(default_path).fileName().startsWith(QStringLiteral("example_imagery_wilburton_online_")));
+
+		source.operational_fingerprint = QByteArray(64, 'a');
+		auto fingerprint_path = OnlineImageryTemplateBuilder::outputFileName(
+			dir.filePath(QStringLiteral("wilburton.omap")), source, QStringLiteral("Catalog source"));
+		QVERIFY(fingerprint_path.contains(QStringLiteral("aaaaaaaaaaaa.xml")));
+		QVERIFY(!writeTextFile(fingerprint_path, QByteArray("unrelated file")).isEmpty());
+		auto extended_path = OnlineImageryTemplateBuilder::outputFileName(
+			dir.filePath(QStringLiteral("wilburton.omap")), source, QStringLiteral("Catalog source"));
+		QVERIFY(extended_path.contains(QStringLiteral("aaaaaaaaaaaaaaaa.xml")));
+	}
+
+	void customImageryTileGridTest()
+	{
+		QFile fixture(QString::fromUtf8(MAPPER_TEST_SOURCE_DIR)
+		              + QStringLiteral("/data/imagery-catalogs/valid/custom-dyadic-epsg2927.oic"));
+		QVERIFY(fixture.open(QIODevice::ReadOnly));
+		auto const catalog = ImageryCatalogReader::read(fixture.readAll());
+		QVERIFY(catalog.accepted());
+		auto const resolved = ImagerySourceResolver::resolve(catalog.catalog.sources.first());
+		QVERIFY(resolved.error.isEmpty());
+		auto const& matrix = resolved.source.tile_matrix_set.tile_matrices.last();
+		auto const span = matrix.cell_size * matrix.tile_size.width();
+		auto const bbox = QRectF(matrix.point_of_origin.x() + 2.1 * span,
+		                         matrix.point_of_origin.y() - 3.9 * span,
+		                         1.7 * span,
+		                         1.7 * span);
+		auto const crop = OnlineImageryTemplateBuilder::snapToTileGrid(bbox, resolved.source);
+		QCOMPARE(crop.tile_level, 2);
+		QCOMPARE(crop.tile_x_min, 0);
+		QCOMPARE(crop.tile_x_max, 3);
+		QCOMPARE(crop.tile_y_min, 0);
+		QCOMPARE(crop.tile_y_max, 3);
+		QCOMPARE(crop.tile_x_min % 64, 0);
+		QCOMPARE(crop.tile_y_min % 64, 0);
+		QCOMPARE(crop.pixel_width, 1024);
+		QCOMPARE(crop.pixel_height, 1024);
+
+		Map map;
+		GdalTemplate generated(QStringLiteral("catalog.xml"), &map);
+		generated.tiled_raster_info.block_size = matrix.tile_size;
+		generated.has_tiled_origin_tile = true;
+		generated.tiled_origin_tile = QPoint(crop.tile_x_min, crop.tile_y_min);
+		QCOMPARE(generated.chooseTiledSubsampling(0.02), 64);
 	}
 
 	void tiledCoreMathTest()

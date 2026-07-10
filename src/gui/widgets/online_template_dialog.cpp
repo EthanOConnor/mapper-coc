@@ -23,6 +23,7 @@
 
 #include <Qt>
 #include <QComboBox>
+#include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -38,7 +39,11 @@
 
 #include "core/georeferencing.h"
 #include "core/map.h"
+#include "gdal/imagery_catalog_reader.h"
+#include "gdal/imagery_catalog_store.h"
+#include "gdal/imagery_source_resolver.h"
 #include "gdal/online_imagery_template_builder.h"
+#include "gui/file_dialog.h"
 
 namespace OpenOrienteering {
 
@@ -59,6 +64,8 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 OnlineTemplateDialog::~OnlineTemplateDialog() = default;
 
 void OnlineTemplateDialog::onAddClicked() {}
+void OnlineTemplateDialog::onImportCatalogClicked() {}
+void OnlineTemplateDialog::importCatalogFile(const QString&, const QString&) {}
 
 #else
 
@@ -66,6 +73,8 @@ namespace {
 
 constexpr int source_url_role = Qt::UserRole;
 constexpr int source_name_role = Qt::UserRole + 1;
+constexpr int catalog_id_role = Qt::UserRole + 2;
+constexpr int catalog_source_id_role = Qt::UserRole + 3;
 constexpr int max_recent_sources = 5;
 
 }  // namespace
@@ -86,10 +95,17 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 
 	auto* layout = new QVBoxLayout(this);
 
-	auto* chooser_label = new QLabel(tr("Recent sources:"), this);
-	layout->addWidget(chooser_label);
+	auto* chooser_header = new QHBoxLayout();
+	auto* chooser_label = new QLabel(tr("Imagery source:"), this);
+	chooser_header->addWidget(chooser_label);
+	chooser_header->addStretch();
+	auto* import_button = new QPushButton(tr("Import catalog…"), this);
+	import_button->setObjectName(QStringLiteral("import_catalog_button"));
+	chooser_header->addWidget(import_button);
+	layout->addLayout(chooser_header);
 
 	source_chooser = new QComboBox(this);
+	source_chooser->setObjectName(QStringLiteral("source_chooser"));
 	populateSourceChooser();
 	layout->addWidget(source_chooser);
 	connect(source_chooser,
@@ -101,6 +117,7 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 	layout->addWidget(url_label);
 
 	url_edit = new QLineEdit(this);
+	url_edit->setObjectName(QStringLiteral("imagery_url"));
 	url_edit->setPlaceholderText(tr("https://tile.example.com/{z}/{x}/{y}.png"));
 	layout->addWidget(url_edit);
 	connect(url_edit, &QLineEdit::textEdited, this, &OnlineTemplateDialog::onUrlEdited);
@@ -119,6 +136,7 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 	auto* coverage_layout = new QHBoxLayout();
 	full_map_radio = new QRadioButton(tr("Full Map"), this);
 	current_view_radio = new QRadioButton(tr("Current View"), this);
+	current_view_radio->setObjectName(QStringLiteral("current_view_coverage"));
 	full_map_radio->setChecked(true);
 	coverage_layout->addWidget(full_map_radio);
 	coverage_layout->addWidget(current_view_radio);
@@ -145,6 +163,7 @@ OnlineTemplateDialog::OnlineTemplateDialog(
 	layout->addLayout(button_layout);
 
 	connect(add_button, &QPushButton::clicked, this, &OnlineTemplateDialog::onAddClicked);
+	connect(import_button, &QPushButton::clicked, this, &OnlineTemplateDialog::onImportCatalogClicked);
 	connect(cancel_button, &QPushButton::clicked, this, &QDialog::reject);
 	connect(url_edit, &QLineEdit::returnPressed, this, &OnlineTemplateDialog::onAddClicked);
 }
@@ -178,14 +197,20 @@ void OnlineTemplateDialog::onAddClicked()
 		return;
 	}
 
-	auto classify_result = OnlineImageryTemplateBuilder::classifyUrl(url_edit->text());
-	if (!classify_result.error.isEmpty())
+	if (has_selected_catalog_source)
 	{
-		setStatus(classify_result.error, Qt::red, false);
-		return;
+		pending_source = selected_catalog_source;
 	}
-
-	pending_source = classify_result.source;
+	else
+	{
+		auto classify_result = OnlineImageryTemplateBuilder::classifyUrl(url_edit->text());
+		if (!classify_result.error.isEmpty())
+		{
+			setStatus(classify_result.error, Qt::red, false);
+			return;
+		}
+		pending_source = classify_result.source;
+	}
 	if (name_edit->text().trimmed().isEmpty())
 		setSuggestedTemplateName(pending_source.display_name);
 
@@ -254,15 +279,97 @@ void OnlineTemplateDialog::generateAndAccept()
 	}
 
 	generated_path = result.xml_path;
-	saveRecentSource(url_edit->text().trimmed(), pending_source.display_name);
+	if (!has_selected_catalog_source)
+		saveRecentSource(url_edit->text().trimmed(), pending_source.display_name);
 	accept();
+}
+
+
+void OnlineTemplateDialog::onImportCatalogClicked()
+{
+	auto const filter = tr("Imagery catalogs (*.%1)").arg(ImageryCatalogReader::fileExtension());
+	auto const path = FileDialog::getOpenFileName(this, tr("Import imagery catalog"), {}, filter);
+	if (!path.isEmpty())
+		importCatalogFile(path);
+}
+
+
+void OnlineTemplateDialog::importCatalogFile(const QString& file_path, const QString& store_root)
+{
+	clearStatus();
+	if (!store_root.isEmpty())
+		catalog_store_root = store_root;
+	QFile file(file_path);
+	if (!file.open(QIODevice::ReadOnly))
+	{
+		setStatus(tr("Could not open catalog: %1").arg(file.errorString()), Qt::red, false);
+		return;
+	}
+
+	auto const candidate = ImageryCatalogReader::read(file.readAll());
+	if (!candidate.accepted())
+	{
+		auto const detail = candidate.issues.isEmpty()
+		                    ? tr("The file is not a valid imagery catalog.")
+		                    : candidate.issues.first().message;
+		setStatus(tr("Could not import catalog: %1").arg(detail), Qt::red, false);
+		return;
+	}
+
+	QString error;
+	ImageryCatalogStore store(catalog_store_root);
+	if (!store.install(candidate, QUrl::fromLocalFile(file_path).toString(), {}, {}, &error))
+	{
+		setStatus(tr("Could not save catalog: %1").arg(error), Qt::red, false);
+		return;
+	}
+
+	populateSourceChooser();
+	int first_source = -1;
+	for (int i = 0; i < source_chooser->count(); ++i)
+	{
+		if (source_chooser->itemData(i, catalog_id_role).toString() == candidate.catalog.id)
+		{
+			first_source = i;
+			break;
+		}
+	}
+	if (first_source >= 0)
+	{
+		source_chooser->setCurrentIndex(first_source);
+		onSourceChosen(first_source);
+	}
+	setStatus(tr("Imported %1.").arg(candidate.catalog.name), Qt::darkGreen, false);
 }
 
 
 void OnlineTemplateDialog::populateSourceChooser()
 {
+	has_selected_catalog_source = false;
 	source_chooser->clear();
-	source_chooser->addItem(tr("Choose a recent source"));
+	source_chooser->addItem(tr("Choose an imagery source"));
+
+	ImageryCatalogStore store(catalog_store_root);
+	auto const catalogs = store.catalogs();
+	bool added_catalog_source = false;
+	for (auto const& installed : catalogs)
+	{
+		for (auto const& source : installed.read_result.catalog.sources)
+		{
+			if (!source.supported)
+				continue;
+			if (!added_catalog_source)
+			{
+				source_chooser->insertSeparator(source_chooser->count());
+				added_catalog_source = true;
+			}
+			auto const index = source_chooser->count();
+			source_chooser->addItem(source.name);
+			source_chooser->setItemData(index, installed.read_result.catalog.id, catalog_id_role);
+			source_chooser->setItemData(index, source.id, catalog_source_id_role);
+			source_chooser->setItemData(index, source.name, source_name_role);
+		}
+	}
 
 	QSettings settings;
 	auto recent_urls = settings.value(QStringLiteral("onlineImagery/recentUrls")).toStringList();
@@ -289,6 +396,7 @@ void OnlineTemplateDialog::populateSourceChooser()
 void OnlineTemplateDialog::onUrlEdited(const QString& text)
 {
 	Q_UNUSED(text)
+	has_selected_catalog_source = false;
 	source_name_hint.clear();
 	if (source_chooser->currentIndex() != 0)
 		source_chooser->setCurrentIndex(0);
@@ -298,6 +406,35 @@ void OnlineTemplateDialog::onUrlEdited(const QString& text)
 
 void OnlineTemplateDialog::onSourceChosen(int index)
 {
+	auto const catalog_id = source_chooser->itemData(index, catalog_id_role).toString();
+	auto const catalog_source_id = source_chooser->itemData(index, catalog_source_id_role).toString();
+	if (!catalog_id.isEmpty() && !catalog_source_id.isEmpty())
+	{
+		for (auto const& installed : ImageryCatalogStore(catalog_store_root).catalogs())
+		{
+			if (installed.read_result.catalog.id != catalog_id)
+				continue;
+			for (auto const& definition : installed.read_result.catalog.sources)
+			{
+				if (definition.id != catalog_source_id)
+					continue;
+				auto const resolved = ImagerySourceResolver::resolve(definition);
+				if (!resolved.error.isEmpty())
+				{
+					setStatus(resolved.error, Qt::red, false);
+					return;
+				}
+				selected_catalog_source = resolved.source;
+				has_selected_catalog_source = true;
+				source_name_hint = resolved.source.display_name;
+				url_edit->setText(resolved.source.normalized_url);
+				setSuggestedTemplateName(source_name_hint);
+				return;
+			}
+		}
+	}
+
+	has_selected_catalog_source = false;
 	auto url = source_chooser->itemData(index, source_url_role).toString();
 	source_name_hint = source_chooser->itemData(index, source_name_role).toString();
 	if (!url.isEmpty())
