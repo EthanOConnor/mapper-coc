@@ -204,7 +204,7 @@ jobs:
       # Bump whenever the "Build minimal GDAL" recipe changes (driver
       # list, CMake flags): the cache key does not see the recipe, so
       # without a bump a stale GDAL build would be reused.
-      GDAL_RECIPE_REV: 2
+      GDAL_RECIPE_REV: 1
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
       CCACHE_COMPILERCHECK: content
@@ -329,8 +329,6 @@ jobs:
           # DESTDIR is unreliable on Windows (drive-letter stripping);
           # stage with an explicit install prefix instead.
           cmake --install /tmp/gdal-build --prefix "$(pwd)/gdal-stage/mingw64"
-          mkdir -p gdal-stage/licenses
-          cp "/tmp/gdal-${GDAL_VERSION}/LICENSE.TXT" gdal-stage/licenses/GDAL-LICENSE.TXT
 
       # Save immediately so a failure later in the job (Mapper build,
       # tests, packaging) does not discard the expensive GDAL build.
@@ -353,8 +351,6 @@ jobs:
       - name: Configure
         run: |
           rm -rf "$BUILD_DIR" "$DIST_DIR"
-          mkdir -p "$BUILD_DIR"
-          : > "$BUILD_DIR/runtime-bundle-notices.txt"
           cmake -S . -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -371,8 +367,6 @@ jobs:
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF \
             -DMapper_VERSION_DISPLAY="$VERSION_DISPLAY" \
-            -DLICENSING_PROVIDER=runtime-bundle \
-            -DLICENSING_RUNTIME_NOTICES="$(pwd)/$BUILD_DIR/runtime-bundle-notices.txt" \
             -DGDAL_DATA_DIR=/mingw64/share/gdal \
             -DPROJ_DATA_DIR=/mingw64/share/proj
           grep -q '^Mapper_PACKAGE_FILE_ASSOCIATIONS:BOOL=OFF$' "$BUILD_DIR/CMakeCache.txt"
@@ -407,14 +401,6 @@ jobs:
         run: |
           dist_prefix="$(pwd)/$DIST_DIR"
           cmake --install "$BUILD_DIR" --prefix "$dist_prefix"
-          packaging/windows/collect-runtime-licenses.sh \
-            "$DIST_DIR" \
-            "$BUILD_DIR/runtime-bundle-notices.txt" \
-            "gdal-stage/licenses/GDAL-LICENSE.TXT" \
-            "$GDAL_VERSION"
-          # Install again after deriving notices from the exact staged DLL
-          # closure so the portable tree and CPack installer contain them.
-          cmake --install "$BUILD_DIR" --prefix "$dist_prefix"
           "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" > "$DIST_DIR/mapper-gdal-info.txt"
           cp "$BUILD_DIR/src/gdal/mapper-gdal-info.exe" "$DIST_DIR/"
 
@@ -428,14 +414,6 @@ jobs:
           # via the CURL_CA_BUNDLE default in gdal_manager.cpp).
           test ! -f "$DIST_DIR/gdal/curl-ca-bundle.crt"
           test -f "$DIST_DIR/proj/proj.db"
-          test -f "$DIST_DIR/doc/licensing.html"
-          test -s "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
-          ! grep -q 'without an external provider' "$DIST_DIR/doc/licensing.html"
-          grep -q "GDAL $GDAL_VERSION" "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
-          grep -q 'mingw-w64-x86_64-curl-winssl ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
-          grep -q 'mingw-w64-x86_64-gcc-libs ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
-          grep -q 'mingw-w64-x86_64-proj ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
-          grep -q 'mingw-w64-x86_64-qt5-base ' "$DIST_DIR/doc/3rd-party/runtime-bundle.txt"
           test -f "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| MBTiles |' "$DIST_DIR/mapper-gdal-info.txt"
           grep -q '| WMS |' "$DIST_DIR/mapper-gdal-info.txt"
@@ -565,9 +543,7 @@ jobs:
           foreach ($requiredPath in @(
             "qt.conf",
             "gdal\gdalvrt.xsd",
-            "proj\proj.db",
-            "doc\licensing.html",
-            "doc\3rd-party\runtime-bundle.txt"
+            "proj\proj.db"
           )) {
             if (-not (Test-Path (Join-Path $rootDir $requiredPath))) {
               throw "Installed tree is missing $requiredPath."
@@ -579,11 +555,6 @@ jobs:
           if (-not (Get-ChildItem -Path $rootDir -Filter "Qt5*.dll" | Select-Object -First 1)) {
             throw "Installed tree is missing Qt runtime DLLs."
           }
-          $licensingHtml = Get-Content (Join-Path $rootDir "doc\licensing.html") -Raw
-          if ($licensingHtml -match "without an external provider") {
-            throw "Installed licensing documentation contains the missing-provider warning."
-          }
-
           $stdoutPath = Join-Path $env:RUNNER_TEMP "mapper-installed-startup.stdout.txt"
           $stderrPath = Join-Path $env:RUNNER_TEMP "mapper-installed-startup.stderr.txt"
           Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue

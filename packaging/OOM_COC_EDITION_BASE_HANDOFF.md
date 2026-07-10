@@ -38,10 +38,14 @@ intended for the class must be validated manually.
 - [ ] The preview is configured with `Mapper_PACKAGE_FILE_ASSOCIATIONS=OFF`.
 - [ ] The uploaded release manifest records artifact names, byte sizes,
       SHA-256 digests, signing status, branch, commit, and Actions run URL.
-- [ ] Required third-party notices and licenses are present; the installed
-      `licensing.html` contains no missing-provider redistribution warning.
-- [ ] Review non-DLL payloads such as Qt translations and data files. The
-      automated runtime-bundle collector derives notices from DLL owners only.
+
+## Internal-alpha packaging boundary
+
+This handoff uses the project's existing packaging and notice outputs. It does
+not add a custom package-owner or license-completeness system for the Windows
+runtime. Before public or broader external distribution, perform a separate
+dependency and notice review. For this internal alpha, record any known notice
+gaps during the candidate review rather than treating CI as a compliance audit.
 
 ## Exact Windows candidate
 
