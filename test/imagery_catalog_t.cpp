@@ -598,9 +598,13 @@ private slots:
 			QJsonArray ring;
 			for (int i = 0; i < ImageryCatalogReader::max_coverage_vertices + 1; ++i)
 				ring.push_back(QJsonArray { -122.0, 47.0 });
+			// A braced single same-type element may select the copy constructor
+			// instead of initializer_list construction, dropping a nesting level.
+			QJsonArray rings;
+			rings.push_back(ring);
 			source.insert(QStringLiteral("coverage"), QJsonObject {
 				{ QStringLiteral("type"), QStringLiteral("Polygon") },
-				{ QStringLiteral("coordinates"), QJsonArray { ring } }
+				{ QStringLiteral("coordinates"), rings }
 			});
 		});
 		auto const result = ImageryCatalogReader::read(too_many_vertices);
