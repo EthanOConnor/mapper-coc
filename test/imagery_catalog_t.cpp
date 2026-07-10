@@ -150,6 +150,8 @@ private slots:
 		QCOMPARE(example.catalog.sources.size(), 5);
 		for (auto const& source : example.catalog.sources)
 			QVERIFY(source.supported);
+		for (auto const& source : example.catalog.sources.mid(0, 4))
+			QCOMPARE(source.request.empty_http_status_codes, QVector<int>({ 404 }));
 	}
 
 	void fingerprints()

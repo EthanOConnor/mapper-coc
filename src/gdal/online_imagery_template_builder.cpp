@@ -272,15 +272,15 @@ OnlineImageryTemplateBuilder::generateXml(
 	out << QStringLiteral("  <BlockSizeX>") << tile_size << QStringLiteral("</BlockSizeX>\n");
 	out << QStringLiteral("  <BlockSizeY>") << tile_size << QStringLiteral("</BlockSizeY>\n");
 	out << QStringLiteral("  <BandsCount>3</BandsCount>\n");
-	if (!generic_grid)
-		out << QStringLiteral("  <ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>\n");
-	else if (!source.request.empty_http_status_codes.isEmpty())
+	QStringList zero_block_http_codes;
+	if (generic_grid && !source.request.empty_http_status_codes.isEmpty())
 	{
-		QStringList codes;
 		for (auto code : source.request.empty_http_status_codes)
-			codes.push_back(QString::number(code));
-		out << QStringLiteral("  <ZeroBlockHttpCodes>") << codes.join(QLatin1Char(',')) << QStringLiteral("</ZeroBlockHttpCodes>\n");
+			zero_block_http_codes.push_back(QString::number(code));
 	}
+	else
+		zero_block_http_codes.push_back(QStringLiteral("404"));
+	out << QStringLiteral("  <ZeroBlockHttpCodes>") << zero_block_http_codes.join(QLatin1Char(',')) << QStringLiteral("</ZeroBlockHttpCodes>\n");
 	if (generic_grid && !source.request.referer.isEmpty())
 		out << QStringLiteral("  <Referer>") << source.request.referer.toHtmlEscaped() << QStringLiteral("</Referer>\n");
 	// Keep GDAL's default per-user cache location instead of baking a

@@ -378,7 +378,9 @@ private slots:
 		QCOMPARE(dialog.result(), int(QDialog::Accepted));
 		QFile generated(dialog.generatedPath());
 		QVERIFY(generated.open(QIODevice::ReadOnly));
-		QVERIFY(generated.readAll().contains("https://tiles.example.test/aerial/${z}/${x}/${y}.png"));
+		auto const generated_xml = generated.readAll();
+		QVERIFY(generated_xml.contains("https://tiles.example.test/aerial/${z}/${x}/${y}.png"));
+		QVERIFY(generated_xml.contains("<ZeroBlockHttpCodes>404</ZeroBlockHttpCodes>"));
 
 		QVERIFY2(store.remove(QStringLiteral("org.example.imagery.minimal"), &error), qPrintable(error));
 	}

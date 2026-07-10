@@ -20,6 +20,9 @@
       "minTileMatrix": "0",
       "maxTileMatrix": "23",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
       "category": "aerial",
       "notices": {
         "sourceUrl": "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2025/MapServer"
@@ -37,6 +40,9 @@
       "minTileMatrix": "0",
       "maxTileMatrix": "23",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
       "category": "aerial",
       "notices": {
         "sourceUrl": "https://gismaps.kingcounty.gov/arcgis/rest/services/BaseMaps/KingCo_Aerial_2023/MapServer"
@@ -216,7 +222,7 @@
         ]
       },
       "request": {
-        "emptyHttpStatusCodes": [204, 404]
+        "emptyHttpStatusCodes": [404]
       },
       "category": "aerial",
       "notices": {
@@ -235,6 +241,9 @@
       "minTileMatrix": "0",
       "maxTileMatrix": "23",
       "tileMatrixSetURI": "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad",
+      "request": {
+        "emptyHttpStatusCodes": [404]
+      },
       "category": "satellite",
       "notices": {
         "sourceUrl": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"
