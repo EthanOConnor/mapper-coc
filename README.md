@@ -2,6 +2,12 @@
 
 Version 0.9.7-COC.5.
 
+> This repository preserves the COC.5 release and download site. Forward COC
+> source development now lives in the public
+> [`EthanOConnor/mapper`](https://github.com/EthanOConnor/mapper) fork; its
+> `main` branch is the product, while `master` mirrors OpenOrienteering
+> upstream.
+
 A Windows preview build of OpenOrienteering Mapper with online imagery support.
 
 [Download and setup](https://ethanoconnor.github.io/mapper-coc/)
