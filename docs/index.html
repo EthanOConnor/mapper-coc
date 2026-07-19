@@ -3,20 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Download OOM — COC Edition: Base for Windows x64.">
-  <title>OOM — COC Edition: Base</title>
+  <meta name="description" content="Download Cascade Orienteering Mapper builds.">
+  <title>COC Mapper downloads</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
     <header>
-      <p class="version">Version 0.9.7-COC.5</p>
-      <h1>OOM — COC Edition: Base</h1>
-      <p>A Windows preview build of OpenOrienteering Mapper with online imagery support.</p>
+      <h1>COC Mapper downloads</h1>
+      <p>Mapper builds used for Cascade Orienteering mapping work.</p>
     </header>
 
-    <section aria-labelledby="download">
-      <h2 id="download">Download</h2>
+    <section aria-labelledby="map-hub-preview">
+      <p class="version">Preview · July 18, 2026</p>
+      <h2 id="map-hub-preview">Mapper with Map Hub</h2>
+      <p>This macOS preview connects Mapper to the COC map library and includes the current tiled-imagery work.</p>
+      <ul class="downloads">
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/download/map-hub-preview-2026-07-18/OpenOrienteering-Mapper-0.9.7-macOS-arm64.dmg">Download for macOS — Apple silicon (.dmg)</a>
+        </li>
+      </ul>
+      <p><strong>Ask Ethan for a COC map library access token.</strong></p>
+      <ol>
+        <li>Install Mapper from the disk image.</li>
+        <li>Open Mapper and click <strong>Map Hub</strong>.</li>
+        <li>Enter the access token in the first-use connection screen.</li>
+      </ol>
+      <p>This preview is unsigned. If macOS blocks the first launch, Control-click Mapper in Finder, choose <strong>Open</strong>, then confirm.</p>
+    </section>
+
+    <section aria-labelledby="base-download">
+      <p class="version">Version 0.9.7-COC.5</p>
+      <h2 id="base-download">COC Base for Windows</h2>
+      <p>The earlier Windows build provides online imagery without Map Hub.</p>
       <ul class="downloads">
         <li>
           <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-windows-x64-installer.exe">Windows installer (.exe)</a>
@@ -33,10 +52,6 @@
       </ul>
       <p>Windows x64 only.</p>
       <p>The installer is unsigned. In Microsoft Defender SmartScreen, select <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
-    </section>
-
-    <section aria-labelledby="imagery">
-      <h2 id="imagery">Imagery quick-start</h2>
       <ol>
         <li>Open <strong>Templates &gt; Online Imagery</strong>.</li>
         <li>Paste a tile URL or import the <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/puget-sound.oic"><code>puget-sound.oic</code> catalog</a>.</li>
@@ -45,7 +60,7 @@
 
     <section aria-labelledby="source">
       <h2 id="source">Source</h2>
-      <p>OOM — COC Edition: Base is built from <a href="https://github.com/EthanOConnor/mapper-coc">this repository</a> under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPLv3</a>.</p>
+      <p>The Map Hub preview is built from the public <a href="https://github.com/EthanOConnor/mapper/tree/topic/coc-map-hub-preview">COC preview branch</a>. The earlier COC Base build is preserved in <a href="https://github.com/EthanOConnor/mapper-coc">this repository</a>. Both are available under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPLv3</a>.</p>
       <p>It is based on <a href="https://www.openorienteering.org">OpenOrienteering Mapper</a>. Its upstream source is on <a href="https://github.com/OpenOrienteering/mapper">GitHub</a>.</p>
     </section>
   </main>
