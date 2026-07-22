@@ -260,7 +260,7 @@ jobs:
           mv "$dmg" "$DIST_DIR/$APP_DMG"
           hdiutil verify "$DIST_DIR/$APP_DMG"
           mountpoint="$(mktemp -d "$RUNNER_TEMP/coc-dmg.XXXXXX")"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$DIST_DIR/$APP_DMG"
+          hdiutil attach -acceptlicense -readonly -nobrowse -mountpoint "$mountpoint" "$DIST_DIR/$APP_DMG"
           test -x "$mountpoint/Mapper.app/Contents/MacOS/Mapper"
           ditto "$mountpoint/Mapper.app" "$DIST_DIR/dmg-smoke/Mapper.app"
           hdiutil detach "$mountpoint"
