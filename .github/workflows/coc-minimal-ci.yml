@@ -14,7 +14,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A slow on-demand Android build should not cancel an otherwise independent
+  # desktop packaging run for the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}-android-${{ inputs.build_android || false }}
   cancel-in-progress: true
 
 jobs:
