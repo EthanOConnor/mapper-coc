@@ -20,7 +20,9 @@
 
 #include "mapper_resource.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QLatin1String>
 #include <QString>
 #include <QStringList>
@@ -32,13 +34,27 @@ namespace OpenOrienteering {
 
 namespace MapperResource {
 
+namespace {
+
+QString environmentPath(const char* name)
+{
+	auto value = qEnvironmentVariable(name);
+	if (value.isEmpty())
+		return {};
+
+	auto info = QFileInfo{value};
+	return info.exists() ? info.absoluteFilePath() : QString{};
+}
+
+}
+
 void setSeachPaths()
 {
 	QStringList data_paths;
-	data_paths.reserve(3);
+	data_paths.reserve(5);
 	
 	QStringList doc_paths;
-	doc_paths.reserve(3);
+	doc_paths.reserve(5);
 	
 #if defined(MAPPER_DEVELOPMENT_BUILD) && defined(MAPPER_DEVELOPMENT_RES_DIR)
 	// Use the directory where Mapper is built during development, 
@@ -66,6 +82,14 @@ void setSeachPaths()
 	data_paths.append(assets);
 	doc_paths.append(assets + QLatin1String("/doc"));
 #else
+	auto const data_override = environmentPath("MAPPER_DATA_PATH");
+	if (!data_override.isEmpty())
+		data_paths.append(data_override);
+
+	auto const doc_override = environmentPath("MAPPER_DOC_PATH");
+	if (!doc_override.isEmpty())
+		doc_paths.append(doc_override);
+
 	data_paths.append(QString::fromLatin1(MAPPER_DATA_DESTINATION));
 	doc_paths.append(QString::fromLatin1(MAPPER_ABOUT_DESTINATION));
 #endif

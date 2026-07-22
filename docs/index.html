@@ -33,15 +33,33 @@
     </section>
 
     <section aria-labelledby="base-download">
-      <p class="version">Version 0.9.7-COC.5</p>
-      <h2 id="base-download">COC Base for Windows</h2>
-      <p>The earlier Windows build provides online imagery without Map Hub.</p>
+      <p class="version">Version 0.9.7-COC.5 · packaging refresh July 22, 2026</p>
+      <h2 id="base-download">Mapper (COC Base)</h2>
+      <p>This upstream-faithful build adds online satellite/aerial imagery and importable imagery catalogs. It does not include Map Hub.</p>
       <ul class="downloads">
         <li>
-          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-windows-x64-installer.exe">Windows installer (.exe)</a>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.dmg">macOS — Apple silicon disk image (.dmg)</a>
         </li>
         <li>
-          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-windows-x64.zip">Portable build (.zip)</a>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-windows-x64-installer.exe">Windows x64 installer (.exe)</a>
+        </li>
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-windows-x64.zip">Windows x64 portable build (.zip)</a>
+        </li>
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-linux-x86_64.AppImage">Linux x86-64 portable AppImage</a>
+        </li>
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-linux-x86_64.deb">Linux x86-64 Debian/Ubuntu package (.deb)</a>
+        </li>
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-linux-x86_64.rpm">Linux x86-64 RPM package (.rpm)</a>
+        </li>
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-linux-x86_64.flatpak">Linux x86-64 Flatpak bundle</a>
+        </li>
+        <li>
+          <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/OOM-COC-Edition-Base-0.9.7-COC.5-android-arm64-v8a.apk">Android arm64 preview (.apk)</a>
         </li>
         <li>
           <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/oom-coc-edition-base-release-manifest.json">Release manifest (.json)</a>
@@ -50,8 +68,8 @@
           <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/puget-sound.oic">Puget Sound imagery catalog (.oic)</a>
         </li>
       </ul>
-      <p>Windows x64 only.</p>
-      <p>The installer is unsigned. In Microsoft Defender SmartScreen, select <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+      <p>The macOS and Windows packages are unsigned. On macOS, Control-click Mapper and choose <strong>Open</strong> if prompted. In Microsoft Defender SmartScreen, select <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+      <p>The Android APK is preview-signed for direct installation rather than Play Store distribution. Uninstall an older COC preview first if Android reports a signing conflict.</p>
       <ol>
         <li>Open <strong>Templates &gt; Online Imagery</strong>.</li>
         <li>Paste a tile URL or import the <a href="https://github.com/EthanOConnor/mapper-coc/releases/latest/download/puget-sound.oic"><code>puget-sound.oic</code> catalog</a>.</li>
@@ -60,7 +78,7 @@
 
     <section aria-labelledby="source">
       <h2 id="source">Source</h2>
-      <p>The Map Hub preview is built from the public <a href="https://github.com/EthanOConnor/mapper/tree/topic/coc-map-hub-preview">COC preview branch</a>. The earlier COC Base build is preserved in <a href="https://github.com/EthanOConnor/mapper-coc">this repository</a>. Both are available under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPLv3</a>.</p>
+      <p>The Map Hub preview is built from the public <a href="https://github.com/EthanOConnor/mapper/tree/topic/coc-map-hub-preview">COC preview branch</a>. Mapper (COC Base), its packaging, and exact release source are preserved in <a href="https://github.com/EthanOConnor/mapper-coc">this repository</a>. Both are available under <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPLv3</a>.</p>
       <p>It is based on <a href="https://www.openorienteering.org">OpenOrienteering Mapper</a>. Its upstream source is on <a href="https://github.com/OpenOrienteering/mapper">GitHub</a>.</p>
     </section>
   </main>

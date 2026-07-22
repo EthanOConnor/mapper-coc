@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ "$#" -ne 5 ]; then
+	echo "usage: $0 <build-dir> <dist-dir> <asset-prefix> <flatpak-id> <package-name>" >&2
+	exit 64
+fi
+
+BUILD_DIR=$(cd "$1" && pwd)
+DIST_DIR=$(mkdir -p "$2" && cd "$2" && pwd)
+ASSET_PREFIX=$3
+FLATPAK_ID=$4
+PACKAGE_NAME=$5
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+APPDIR="$DIST_DIR/AppDir"
+PACKAGE_ROOT="$DIST_DIR/package-root"
+FLATPAK_ROOT="$DIST_DIR/flatpak-root"
+FLATPAK_BUILD_DIR="$DIST_DIR/flatpak-build"
+FLATPAK_REPO="$DIST_DIR/flatpak-repo"
+RELEASE_DIR="$DIST_DIR/release"
+LINUXDEPLOY_BIN=${LINUXDEPLOY_BIN:-linuxdeploy}
+
+rm -rf "$APPDIR" "$PACKAGE_ROOT" "$FLATPAK_ROOT" "$FLATPAK_BUILD_DIR" "$FLATPAK_REPO" "$RELEASE_DIR"
+mkdir -p "$APPDIR/usr" "$RELEASE_DIR"
+
+cmake --install "$BUILD_DIR" --prefix "$APPDIR/usr" --strip
+
+mkdir -p "$APPDIR/usr/lib/$PACKAGE_NAME"
+mv "$APPDIR/usr/bin/Mapper" "$APPDIR/usr/lib/$PACKAGE_NAME/Mapper.bin"
+install -m 0755 "$SCRIPT_DIR/Mapper-launcher.sh" "$APPDIR/usr/bin/Mapper"
+
+if [ -x "$BUILD_DIR/src/gdal/mapper-gdal-info" ]; then
+	"$BUILD_DIR/src/gdal/mapper-gdal-info" > "$APPDIR/usr/share/$PACKAGE_NAME/mapper-gdal-info.txt"
+fi
+
+ln -sfn usr/bin/Mapper "$APPDIR/AppRun"
+ln -sfn usr/share/applications/Mapper.desktop "$APPDIR/Mapper.desktop"
+ln -sfn usr/share/icons/hicolor/256x256/apps/Mapper.png "$APPDIR/.DirIcon"
+
+linuxdeploy_args=(
+	--appdir "$APPDIR"
+	--desktop-file "$APPDIR/usr/share/applications/Mapper.desktop"
+	--icon-file "$APPDIR/usr/share/icons/hicolor/256x256/apps/Mapper.png"
+	--executable "$APPDIR/usr/lib/$PACKAGE_NAME/Mapper.bin"
+	--plugin qt
+)
+
+while IFS= read -r plugin; do
+	linuxdeploy_args+=(--library "$plugin")
+done < <(find "$APPDIR/usr/lib/$PACKAGE_NAME/plugins" -type f -name '*.so' | sort)
+
+"$LINUXDEPLOY_BIN" "${linuxdeploy_args[@]}"
+
+mkdir -p "$PACKAGE_ROOT/usr"
+cp -a "$APPDIR/usr/." "$PACKAGE_ROOT/usr/"
+
+mkdir -p "$FLATPAK_ROOT"
+cp -a "$PACKAGE_ROOT/usr/." "$FLATPAK_ROOT/"
+
+flatpak_desktop="$FLATPAK_ROOT/share/applications/$FLATPAK_ID.desktop"
+sed "s/^Icon=.*/Icon=$FLATPAK_ID/" \
+	"$FLATPAK_ROOT/share/applications/Mapper.desktop" > "$flatpak_desktop"
+rm -f "$FLATPAK_ROOT/share/applications/Mapper.desktop"
+
+while IFS= read -r icon; do
+	icon_dir=$(dirname "$icon")
+	cp "$icon" "$icon_dir/$FLATPAK_ID.png"
+done < <(find "$FLATPAK_ROOT/share/icons/hicolor" -path '*/apps/Mapper.png' | sort)
+
+desktop-file-validate "$flatpak_desktop"
+
+cat > "$DIST_DIR/flatpak.yml" <<EOF
+id: $FLATPAK_ID
+branch: stable
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: Mapper
+finish-args:
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=home
+modules:
+  - name: mapper
+    buildsystem: simple
+    build-commands:
+      - install -d /app
+      - cp -a ./. /app/
+    sources:
+      - type: dir
+        path: flatpak-root
+EOF
+
+flatpak-builder \
+	--force-clean \
+	--user \
+	--install-deps-from=flathub \
+	--repo="$FLATPAK_REPO" \
+	"$FLATPAK_BUILD_DIR" \
+	"$DIST_DIR/flatpak.yml"
+
+flatpak build-bundle \
+	"$FLATPAK_REPO" \
+	"$RELEASE_DIR/$ASSET_PREFIX.flatpak" \
+	"$FLATPAK_ID" \
+	stable \
+	--runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+
+fpm_common=(
+	-s dir
+	-C "$PACKAGE_ROOT"
+	-n "$PACKAGE_NAME"
+	-v 0.9.7
+	--iteration coc5.1
+	--url "https://github.com/EthanOConnor/mapper-coc"
+	--vendor "OpenOrienteering"
+	--license "GPL-3.0-or-later"
+	--maintainer "Ethan O'Connor"
+	--description "OpenOrienteering Mapper COC.5 with online imagery and imagery catalogs"
+)
+
+fpm "${fpm_common[@]}" -t deb -a amd64 -p "$RELEASE_DIR/$ASSET_PREFIX.deb" usr
+fpm "${fpm_common[@]}" -t rpm -a x86_64 --rpm-os linux -p "$RELEASE_DIR/$ASSET_PREFIX.rpm" usr
+
+(
+	cd "$RELEASE_DIR"
+	ARCH=x86_64 "$LINUXDEPLOY_BIN" --appdir "$APPDIR" --output appimage
+	appimage=$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1)
+	mv "$appimage" "$ASSET_PREFIX.AppImage"
+)
+
+test -s "$RELEASE_DIR/$ASSET_PREFIX.AppImage"
+test -s "$RELEASE_DIR/$ASSET_PREFIX.deb"
+test -s "$RELEASE_DIR/$ASSET_PREFIX.rpm"
+test -s "$RELEASE_DIR/$ASSET_PREFIX.flatpak"

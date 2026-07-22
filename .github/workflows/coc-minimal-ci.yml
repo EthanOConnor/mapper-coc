@@ -20,9 +20,13 @@ concurrency:
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 120
     env:
       BUILD_DIR: build/linux
+      DIST_DIR: dist/linux-x86_64
+      ASSET_PREFIX: OOM-COC-Edition-Base-0.9.7-COC.5-linux-x86_64
+      PACKAGE_NAME: openorienteering-mapper-coc
+      FLATPAK_ID: org.openorienteering.Mapper.coc
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 400M
       CCACHE_COMPILERCHECK: content
@@ -33,11 +37,28 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ ccache \
+            appstream desktop-file-utils elfutils file flatpak flatpak-builder \
+            cmake ninja-build g++ ccache ruby ruby-dev rpm \
             libgdal-dev libproj-dev libpolyclipping-dev libcups2-dev \
             qtbase5-dev qtbase5-private-dev qttools5-dev qttools5-dev-tools \
             libqt5sensors5-dev libqt5serialport5-dev libqt5network5 \
             qt5-image-formats-plugins doxygen
+          sudo gem install --no-document fpm
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Download pinned Linux packaging tools
+        run: |
+          mkdir -p "$DIST_DIR/tools"
+          curl -fL \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
+            -o "$DIST_DIR/tools/linuxdeploy-x86_64.AppImage"
+          curl -fL \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage \
+            -o "$DIST_DIR/tools/linuxdeploy-plugin-qt-x86_64.AppImage"
+          echo 'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  dist/linux-x86_64/tools/linuxdeploy-x86_64.AppImage' | sha256sum -c -
+          echo '15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724  dist/linux-x86_64/tools/linuxdeploy-plugin-qt-x86_64.AppImage' | sha256sum -c -
+          chmod +x "$DIST_DIR/tools/"*.AppImage
+          ln -s linuxdeploy-plugin-qt-x86_64.AppImage "$DIST_DIR/tools/linuxdeploy-plugin-qt"
 
       - name: Restore compiler cache
         uses: actions/cache/restore@v6
@@ -56,6 +77,12 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DMapper_USE_GDAL=ON \
+            -DMapper_VERSION_DISPLAY=0.9.7-COC.5 \
+            -DMapper_PACKAGE_NAME="$PACKAGE_NAME" \
+            -DMapper_PACKAGE_QT=ON \
+            -DMapper_PACKAGE_PROJ=ON \
+            -DMapper_PACKAGE_GDAL=ON \
+            -DMapper_PACKAGE_ASSISTANT=OFF \
             -DMapper_MANUAL_QTHELP=OFF \
             -DMapper_MANUAL_PDF=OFF
 
@@ -78,13 +105,55 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir "$BUILD_DIR" --output-on-failure -j "$(nproc)"
 
+      - name: Package Linux release assets
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          LINUXDEPLOY_BIN: ${{ github.workspace }}/${{ env.DIST_DIR }}/tools/linuxdeploy-x86_64.AppImage
+          QMAKE: /usr/lib/qt5/bin/qmake
+        run: |
+          bash packaging/linux/package-release-assets.sh \
+            "$BUILD_DIR" \
+            "$DIST_DIR" \
+            "$ASSET_PREFIX" \
+            "$FLATPAK_ID" \
+            "$PACKAGE_NAME"
+
+      - name: Smoke-test Linux packages
+        run: |
+          sudo apt-get install -y xvfb
+          appimage="$DIST_DIR/release/$ASSET_PREFIX.AppImage"
+          chmod +x "$appimage"
+          set +e
+          timeout --signal=TERM --kill-after=5s 10s \
+            xvfb-run --auto-servernum "$appimage" \
+            > "$DIST_DIR/appimage-smoke.log" 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 124 ]; then
+            cat "$DIST_DIR/appimage-smoke.log"
+            exit "$status"
+          fi
+          dpkg-deb --info "$DIST_DIR/release/$ASSET_PREFIX.deb"
+          rpm -qip "$DIST_DIR/release/$ASSET_PREFIX.rpm"
+          test -s "$DIST_DIR/release/$ASSET_PREFIX.flatpak"
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: coc-base-linux-x86-64
+          path: dist/linux-x86_64/release/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
   macos:
     runs-on: macos-15
     timeout-minutes: 45
     env:
       BUILD_DIR: build/macos
       DIST_DIR: dist/macos-arm64
-      APP_ZIP: coc-minimal-macos-arm64-app.zip
+      APP_ZIP: OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.zip
+      APP_DMG: OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.dmg
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -115,6 +184,7 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_PREFIX_PATH="$(brew --prefix qt@5)" \
             -DMapper_USE_GDAL=ON \
+            -DMapper_VERSION_DISPLAY=0.9.7-COC.5 \
             -DMapper_PACKAGE_QT=ON \
             -DMapper_PACKAGE_PROJ=ON \
             -DMapper_PACKAGE_GDAL=ON \
@@ -181,13 +251,40 @@ jobs:
           ditto -c -k --keepParent "$DIST_DIR/Mapper.app" "$DIST_DIR/$APP_ZIP"
           unzip -l "$DIST_DIR/$APP_ZIP" | grep -q '^.*Mapper.app/Contents/MacOS/Mapper$'
 
+      - name: Create and smoke-test disk image
+        run: |
+          export PATH="$(brew --prefix qt@5)/bin:$PATH"
+          cpack --config "$BUILD_DIR/CPackConfig.cmake" -G DragNDrop -B "$DIST_DIR/cpack"
+          dmg="$(find "$DIST_DIR/cpack" -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -s "$dmg"
+          mv "$dmg" "$DIST_DIR/$APP_DMG"
+          hdiutil verify "$DIST_DIR/$APP_DMG"
+          mountpoint="$(mktemp -d "$RUNNER_TEMP/coc-dmg.XXXXXX")"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$DIST_DIR/$APP_DMG"
+          test -x "$mountpoint/Mapper.app/Contents/MacOS/Mapper"
+          ditto "$mountpoint/Mapper.app" "$DIST_DIR/dmg-smoke/Mapper.app"
+          hdiutil detach "$mountpoint"
+          mkdir -p "$DIST_DIR/dmg-smoke/home"
+          HOME="$DIST_DIR/dmg-smoke/home" "$DIST_DIR/dmg-smoke/Mapper.app/Contents/MacOS/Mapper" \
+            > "$DIST_DIR/dmg-smoke/mapper.log" 2>&1 &
+          mapper_pid=$!
+          sleep 10
+          if ! kill -0 "$mapper_pid" 2>/dev/null; then
+            cat "$DIST_DIR/dmg-smoke/mapper.log"
+            exit 1
+          fi
+          kill "$mapper_pid"
+          wait "$mapper_pid" || true
+
       - name: Upload app bundle
         uses: actions/upload-artifact@v7
         with:
           name: coc-minimal-macos-arm64-app
-          path: dist/macos-arm64/coc-minimal-macos-arm64-app.zip
+          path: |
+            dist/macos-arm64/OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.zip
+            dist/macos-arm64/OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.dmg
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
           compression-level: 0
 
   windows:
@@ -704,7 +801,7 @@ jobs:
         run: |
           source_sha="$(git rev-parse --short=7 HEAD)"
           echo "SOURCE_SHA=$source_sha" >> "$GITHUB_ENV"
-          echo "ASSET_NAME=OpenOrienteering-Mapper-coc-minimal-android-${TARGET_ABI}-${source_sha}.apk" >> "$GITHUB_ENV"
+          echo "ASSET_NAME=OOM-COC-Edition-Base-0.9.7-COC.5-android-${TARGET_ABI}.apk" >> "$GITHUB_ENV"
 
       - name: Build Android APK
         env:
@@ -718,11 +815,30 @@ jobs:
             "$APP_ID" \
             "$BUILD_DIR/release/$ASSET_NAME"
 
+      - name: Sign and validate installable APK
+        run: |
+          unsigned_apk="$BUILD_DIR/release/$ASSET_NAME"
+          signed_apk="$BUILD_DIR/release/signed.apk"
+          apksigner="$(find .tmp/android-sdk -type f -name apksigner -print -quit)"
+          test -x "$apksigner"
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/coc-preview.jks" \
+            -storepass coc-preview -keypass coc-preview \
+            -alias coc-preview -keyalg RSA -keysize 3072 -validity 10950 \
+            -dname 'CN=COC Mapper Preview, O=Cascade Orienteering Club, C=US'
+          "$apksigner" sign \
+            --ks "$RUNNER_TEMP/coc-preview.jks" \
+            --ks-pass pass:coc-preview --key-pass pass:coc-preview \
+            --out "$signed_apk" "$unsigned_apk"
+          "$apksigner" verify --verbose --print-certs "$signed_apk"
+          mv "$signed_apk" "$unsigned_apk"
+          unzip -t "$unsigned_apk"
+
       - name: Upload Android APK
         uses: actions/upload-artifact@v7
         with:
           name: coc-minimal-android-arm64-apk
           path: ${{ env.BUILD_DIR }}/release/*.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
           compression-level: 0

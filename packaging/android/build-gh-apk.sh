@@ -69,7 +69,7 @@ fi
 cmake -S "$SUPERBUILD_SOURCE_DIR" -B "$BUILD_DIR" -G "$CMAKE_GENERATOR" \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 	"-DMapper_CI_SOURCE_DIR=$SOURCE_DIR" \
-	"-DMapper_CI_VERSION_DISPLAY=" \
+	"-DMapper_CI_VERSION_DISPLAY=0.9.7-COC.5" \
 	"-DMapper_CI_APP_ID=$APP_ID" \
 	"-DMapper_CI_GDAL_DATA_DIR=$target_install_dir/usr/share/gdal" \
 	"-DENABLE_$TARGET=1" \

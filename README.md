@@ -8,15 +8,18 @@ Version 0.9.7-COC.5.
 > `main` branch is the product, while `master` mirrors OpenOrienteering
 > upstream.
 
-The download site now includes the modern macOS Map Hub preview and preserves
-the earlier Windows build with online imagery support.
+The download site includes the modern macOS Map Hub preview and the
+upstream-faithful COC.5 build with online imagery support for Linux, macOS,
+Windows, and Android.
 
 [Download and setup](https://ethanoconnor.github.io/mapper-coc/)
 
-The site provides the installer, portable ZIP, release manifest, and Puget Sound imagery catalog.
+The site provides Linux packages, macOS and Windows downloads, an Android
+preview APK, the release manifest, and the Puget Sound imagery catalog.
 
 The Map Hub preview is available for Apple silicon Macs. Ask Ethan for a COC
-map library access token. The earlier COC Base build remains Windows x64 only.
+map library access token. Mapper (COC Base) is the upstream-faithful line for
+online imagery without Map Hub.
 
 For imagery, open **Templates > Online Imagery**. Paste a tile URL or import the `puget-sound.oic` catalog.
 
