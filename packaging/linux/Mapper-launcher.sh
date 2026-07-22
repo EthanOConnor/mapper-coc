@@ -18,8 +18,12 @@ prepend_path() {
 	fi
 }
 
-self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-prefix=$(CDPATH= cd -- "$self_dir/.." && pwd)
+if [ -n "${APPDIR:-}" ] && [ -d "$APPDIR/usr" ]; then
+	prefix="$APPDIR/usr"
+else
+	self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+	prefix=$(CDPATH= cd -- "$self_dir/.." && pwd)
+fi
 package_name=openorienteering-mapper-coc
 app_lib_dir="$prefix/lib/$package_name"
 primary_plugin_dir="$app_lib_dir/plugins"
