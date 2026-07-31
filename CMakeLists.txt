@@ -317,6 +317,25 @@ endif()
 add_subdirectory("doc/api")
 add_subdirectory("packaging/src")
 
+if(APPLE)
+	# Bundle deployment, stripping, and licensing installation all modify the
+	# app. Seal only after every install rule has populated the final bundle.
+	install(CODE [[
+		set(mapper_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/Mapper.app")
+		execute_process(
+			COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
+			        "${mapper_app}"
+			RESULT_VARIABLE codesign_result
+			OUTPUT_VARIABLE codesign_output
+			ERROR_VARIABLE codesign_error
+		)
+		if(NOT codesign_result EQUAL 0)
+			message(FATAL_ERROR
+				"Failed to seal ${mapper_app}: ${codesign_output}${codesign_error}")
+		endif()
+	]])
+endif()
+
 # Auxiliary targets
 
 set(ci

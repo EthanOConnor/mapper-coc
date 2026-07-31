@@ -74,18 +74,6 @@ function(fixup_bundle_portable runtime dirs)
 				execute_process(COMMAND "@CMAKE_STRIP@" -x "${item}")
 			endforeach()
 		endif()
-		set(mapper_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}${runtime_destination}/Mapper.app")
-		execute_process(
-			COMMAND /usr/bin/codesign --force --deep --sign - --timestamp=none
-			        "${mapper_app}"
-			RESULT_VARIABLE codesign_result
-			OUTPUT_VARIABLE codesign_output
-			ERROR_VARIABLE codesign_error
-		)
-		if(NOT codesign_result EQUAL 0)
-			message(FATAL_ERROR
-				"Failed to seal ${mapper_app}: ${codesign_output}${codesign_error}")
-		endif()
 	elseif(ANDROID)
 		# Do nothing
 	elseif(UNIX)
