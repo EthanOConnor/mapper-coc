@@ -231,6 +231,9 @@ jobs:
           test -f "$app/Contents/Resources/proj/proj.db"
           test -f "$app/Contents/Resources/gdal/gdalvrt.xsd"
           test -d "$app/Contents/Frameworks"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          signature_flags="$(codesign -dv --verbose=4 "$app" 2>&1)"
+          grep -Fq 'Signature=adhoc' <<< "$signature_flags"
           otool -L "$app/Contents/MacOS/Mapper"
           # Check every Mach-O file in the bundle, not just the main
           # executable: transitive Homebrew linkage (e.g. a bundled GDAL
@@ -266,6 +269,7 @@ jobs:
           test -x "$mountpoint/Mapper.app/Contents/MacOS/Mapper"
           ditto "$mountpoint/Mapper.app" "$DIST_DIR/dmg-smoke/Mapper.app"
           hdiutil detach "$mountpoint"
+          codesign --verify --deep --strict --verbose=2 "$DIST_DIR/dmg-smoke/Mapper.app"
           mkdir -p "$DIST_DIR/dmg-smoke/home"
           HOME="$DIST_DIR/dmg-smoke/home" "$DIST_DIR/dmg-smoke/Mapper.app/Contents/MacOS/Mapper" \
             > "$DIST_DIR/dmg-smoke/mapper.log" 2>&1 &
