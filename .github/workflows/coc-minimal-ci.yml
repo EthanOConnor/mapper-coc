@@ -145,7 +145,7 @@ jobs:
           name: coc-base-linux-x86-64
           path: dist/linux-x86_64/release/*
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
           compression-level: 0
 
   macos:
@@ -154,7 +154,6 @@ jobs:
     env:
       BUILD_DIR: build/macos
       DIST_DIR: dist/macos-arm64
-      APP_ZIP: OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.zip
       APP_DMG: OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.dmg
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
@@ -248,11 +247,6 @@ jobs:
           done < <(find "$app" -type f -print0)
           exit "$violations"
 
-      - name: Create app ZIP
-        run: |
-          ditto -c -k --keepParent "$DIST_DIR/Mapper.app" "$DIST_DIR/$APP_ZIP"
-          unzip -l "$DIST_DIR/$APP_ZIP" | grep -q '^.*Mapper.app/Contents/MacOS/Mapper$'
-
       - name: Create and smoke-test disk image
         run: |
           export PATH="$(brew --prefix qt@5)/bin:$PATH"
@@ -282,11 +276,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: coc-minimal-macos-arm64-app
-          path: |
-            dist/macos-arm64/OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.zip
-            dist/macos-arm64/OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.dmg
+          path: dist/macos-arm64/OOM-COC-Edition-Base-0.9.7-COC.5-macOS-arm64.dmg
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
           compression-level: 0
 
   windows:
@@ -735,7 +727,7 @@ jobs:
           name: oom-coc-edition-base-windows-x64-portable
           path: dist/OOM-COC-Edition-Base-*-windows-x64-*.zip
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
           compression-level: 0
 
       - name: Upload Windows installer
@@ -744,7 +736,7 @@ jobs:
           name: oom-coc-edition-base-windows-x64-installer
           path: dist/OOM-COC-Edition-Base-*-windows-x64-installer-*.exe
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
           compression-level: 0
 
       - name: Upload release manifest
@@ -753,7 +745,7 @@ jobs:
           name: oom-coc-edition-base-release-manifest
           path: dist/oom-coc-edition-base-release-manifest.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
 
   android:
     # Skipped on push until CI modernization (superbuild caching, disk
@@ -842,5 +834,5 @@ jobs:
           name: coc-minimal-android-arm64-apk
           path: ${{ env.BUILD_DIR }}/release/*.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
           compression-level: 0
