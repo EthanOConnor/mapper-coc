@@ -22,6 +22,8 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
+#include <QKeyEvent>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QSignalMapper>
@@ -146,6 +148,45 @@ void CheckBoxItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
 		                  box.right() - box.width() * 0.24, box.center().y());
 	}
 	painter->restore();
+}
+
+bool CheckBoxItemDelegate::editorEvent(QEvent* event, QAbstractItemModel* model,
+	                                    const QStyleOptionViewItem& option,
+	                                    const QModelIndex& index)
+{
+	const auto flags = model->flags(index);
+	const auto value = index.data(Qt::CheckStateRole);
+	if (!(flags & Qt::ItemIsUserCheckable) || !(flags & Qt::ItemIsEnabled) || !value.isValid())
+		return false;
+
+	switch (event->type())
+	{
+	case QEvent::MouseButtonPress:
+	case QEvent::MouseButtonRelease:
+	{
+		auto* mouse_event = static_cast<QMouseEvent*>(event);
+		if (mouse_event->button() != Qt::LeftButton || !option.rect.contains(mouse_event->pos()))
+			return false;
+		if (event->type() == QEvent::MouseButtonPress)
+			return true;
+		break;
+	}
+	case QEvent::MouseButtonDblClick:
+		return true;
+	case QEvent::KeyPress:
+	{
+		auto* key_event = static_cast<QKeyEvent*>(event);
+		if (key_event->key() != Qt::Key_Space && key_event->key() != Qt::Key_Select)
+			return false;
+		break;
+	}
+	default:
+		return false;
+	}
+
+	const auto old_state = static_cast<Qt::CheckState>(value.toInt());
+	const auto new_state = old_state == Qt::Unchecked ? Qt::Checked : Qt::Unchecked;
+	return model->setData(index, new_state, Qt::CheckStateRole);
 }
 
 

@@ -47,6 +47,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QTableView>
 #include <QTransform>
 
 #ifdef ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
@@ -67,6 +68,8 @@
 #include "fileformats/xml_file_format_p.h"
 #include "gdal/ogr_template.h"
 #include "gdal/gdal_manager.h"
+#include "gui/map/map_editor.h"
+#include "gui/widgets/template_list_widget.h"
 #include "templates/template.h"
 #include "templates/template_image.h"
 #include "templates/template_table_model.h"
@@ -743,6 +746,35 @@ private slots:
 		QCOMPARE(model.insertionRowFromPos(0, true), 2);
 		QCOMPARE(model.insertionRowFromPos(0, false), 1);
 		QCOMPARE(model.insertionRowFromPos(1, false), 0);
+	}
+
+	void templateVisibilityMouseTest()
+	{
+		Map map;
+		MapView view{ &map };
+		QVERIFY(map.loadFrom(QStringLiteral("testdata:templates/world-file.xmap"), &view));
+
+		MapEditorController controller{MapEditorController::MapEditor};
+		TemplateListWidget widget{map, view, controller};
+		auto* table = widget.findChild<QTableView*>();
+		QVERIFY(table);
+		QVERIFY(table->itemDelegateForColumn(TemplateTableModel::visibilityColumn()));
+
+		widget.resize(500, 300);
+		widget.show();
+		QVERIFY(QTest::qWaitForWindowExposed(&widget));
+
+		auto* model = qobject_cast<TemplateTableModel*>(table->model());
+		QVERIFY(model);
+		const auto index = model->index(model->rowFromPos(0), TemplateTableModel::visibilityColumn());
+		const auto old_state = index.data(Qt::CheckStateRole).toInt();
+		QCOMPARE(old_state, int(Qt::PartiallyChecked));
+
+		QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, table->visualRect(index).center());
+		QTRY_COMPARE(index.data(Qt::CheckStateRole).toInt(), int(Qt::Unchecked));
+
+		QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, table->visualRect(index).center());
+		QTRY_COMPARE(index.data(Qt::CheckStateRole).toInt(), int(Qt::PartiallyChecked));
 	}
 	
 };

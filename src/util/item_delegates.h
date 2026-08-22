@@ -30,6 +30,7 @@
 #include <QVariant>
 
 class QAbstractItemModel;
+class QEvent;
 class QModelIndex;
 class QPainter;
 class QTextDocument;
@@ -70,6 +71,10 @@ public:
 
 	/** Renders the cell and its check state. */
 	void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override;
+
+	/** Toggles the check state using the geometry painted by this delegate. */
+	bool editorEvent(QEvent* event, QAbstractItemModel* model, const QStyleOptionViewItem& option,
+	                 const QModelIndex& index) override;
 };
 
 
