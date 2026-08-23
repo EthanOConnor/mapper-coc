@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Fetch source post mirrors and candidate terrain endpoints
+      - name: Recover source post, related site map, and media
         shell: bash
         run: |
           set -u
@@ -27,72 +27,77 @@ jobs:
             name="$1"
             url="$2"
             echo "Fetching ${url}"
-            curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 120 \
+            curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 \
               -sS -D "out/${name}.headers" "$url" -o "out/${name}" || true
             wc -c "out/${name}" 2>/dev/null || true
           }
 
-          fetch fxtwitter.json 'https://api.fxtwitter.com/SegerYU/status/2091250852568932449'
-          fetch vxtwitter.json 'https://api.vxtwitter.com/SegerYU/status/2091250852568932449'
-          fetch syndication.json 'https://cdn.syndication.twimg.com/tweet-result?id=2091250852568932449&lang=en'
-          fetch oembed.json 'https://publish.twitter.com/oembed?url=https://twitter.com/SegerYU/status/2091250852568932449&omit_script=1'
-          fetch twstalker_seger.html 'https://ngntipkolamrenang.twstalker.com/SegerYU'
-          fetch twstalker_mickey.html 'https://ngntipkolamrenang.twstalker.com/mickeywzx'
+          fetch chart_post.json 'https://api.fxtwitter.com/SegerYU/status/2091250852568932449'
+          fetch timeline.json 'https://api.fxtwitter.com/2/profile/SegerYU/statuses?count=100&with_replies=1'
+          curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 -sS -G \
+            --data-urlencode 'q=from:SegerYU 嫦娥七号' \
+            --data-urlencode 'feed=latest' --data-urlencode 'count=100' \
+            'https://api.fxtwitter.com/2/search' -o out/search_ce7.json || true
+          curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 -sS -G \
+            --data-urlencode 'q=from:SegerYU 36 km' \
+            --data-urlencode 'feed=latest' --data-urlencode 'count=100' \
+            'https://api.fxtwitter.com/2/search' -o out/search_36km.json || true
+          curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 -sS -G \
+            --data-urlencode 'q=嫦娥七号预选着陆点高程图' \
+            --data-urlencode 'feed=latest' --data-urlencode 'count=100' \
+            'https://api.fxtwitter.com/2/search' -o out/search_exact.json || true
 
           python3 - <<'PY'
-          import html
           import json
           import pathlib
-          import re
           import requests
 
           out = pathlib.Path('out')
-          texts = []
-          report = []
-          for p in out.iterdir():
-              if p.is_file() and p.suffix in {'.json', '.html'}:
-                  try:
-                      texts.append(p.read_text(errors='ignore'))
-                  except Exception:
-                      pass
-          text = '\n'.join(texts)
-
-          urls = set()
-          for match in re.findall(r"https?[^\s\"'<>]+", text):
-              u = html.unescape(match).replace('\\/', '/').rstrip('},])\\')
-              if any(host in u for host in ('pbs.twimg.com', 'video.twimg.com', 'twimg.com/media')):
-                  urls.add(u)
+          media_urls = set()
+          posts = []
 
           def walk(x):
               if isinstance(x, dict):
-                  for v in x.values():
+                  if isinstance(x.get('id'), str) and isinstance(x.get('text'), str):
+                      posts.append({
+                          'id': x.get('id'), 'url': x.get('url'), 'text': x.get('text'),
+                          'created_at': x.get('created_at'),
+                          'author': (x.get('author') or {}).get('screen_name') if isinstance(x.get('author'), dict) else None,
+                      })
+                  for k, v in x.items():
+                      if isinstance(v, str) and v.startswith('http') and any(h in v for h in ('pbs.twimg.com', 'video.twimg.com')):
+                          media_urls.add(v)
                       walk(v)
               elif isinstance(x, list):
                   for v in x:
                       walk(v)
-              elif isinstance(x, str) and x.startswith('http'):
-                  if any(host in x for host in ('pbs.twimg.com', 'video.twimg.com', 'twimg.com/media')):
-                      urls.add(x)
 
           for p in out.glob('*.json'):
               try:
                   walk(json.loads(p.read_text()))
-              except Exception:
-                  pass
+              except Exception as e:
+                  print('JSON parse failed', p, repr(e))
 
-          for i, u in enumerate(sorted(urls)):
+          # Deduplicate posts while preserving enough evidence for site selection.
+          dedup = {}
+          for p in posts:
+              dedup[p['id']] = p
+          selected = sorted(dedup.values(), key=lambda p: p.get('created_at') or '')
+          (out / 'posts.json').write_text(json.dumps(selected, ensure_ascii=False, indent=2), encoding='utf-8')
+          (out / 'posts.txt').write_text('\n\n'.join(
+              f"{p.get('created_at')} {p.get('id')} {p.get('url')}\n{p.get('text')}" for p in selected
+          ), encoding='utf-8')
+
+          report = []
+          for i, u in enumerate(sorted(media_urls)):
               try:
-                  r = requests.get(u, timeout=120, headers={'User-Agent': 'Mozilla/5.0'})
+                  r = requests.get(u, timeout=180, headers={'User-Agent': 'Mozilla/5.0'})
                   ct = r.headers.get('content-type', '')
                   ext = '.bin'
-                  if 'jpeg' in ct or 'jpg' in ct:
-                      ext = '.jpg'
-                  elif 'png' in ct:
-                      ext = '.png'
-                  elif 'webp' in ct:
-                      ext = '.webp'
-                  elif 'mp4' in ct:
-                      ext = '.mp4'
+                  if 'jpeg' in ct or 'jpg' in ct: ext = '.jpg'
+                  elif 'png' in ct: ext = '.png'
+                  elif 'webp' in ct: ext = '.webp'
+                  elif 'mp4' in ct: ext = '.mp4'
                   fn = out / 'media' / f'media_{i:03d}{ext}'
                   fn.write_bytes(r.content)
                   report.append({'url': u, 'file': str(fn), 'status': r.status_code,
@@ -100,21 +105,19 @@ jobs:
               except Exception as e:
                   report.append({'url': u, 'error': repr(e)})
           (out / 'media_report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+          print((out / 'posts.txt').read_text())
           print(json.dumps(report, indent=2))
           PY
 
           cat > out/terrain_urls.txt <<'EOF'
-          https://pds.lroc.im-ldi.com/data/LRO-L-LROC-5-RDR-V1.0/LROLRC_2001/DATA/SDP/NAC_DTM/ESALL_SR12/NAC_DTM_ESALL_SR12.TIF
           https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/SDP/NAC_DTM/ESALL_SR12/NAC_DTM_ESALL_SR12.TIF
           https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif
           https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF
           EOF
-
           : > out/terrain_probe.txt
           while IFS= read -r url; do
             echo "=== ${url}" >> out/terrain_probe.txt
-            curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 120 \
-              -sS -I "$url" >> out/terrain_probe.txt 2>&1 || true
+            curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 120 -sS -I "$url" >> out/terrain_probe.txt 2>&1 || true
           done < out/terrain_urls.txt
 
           find out -maxdepth 2 -type f -printf '%p\t%s bytes\n' | sort | tee out/listing.txt
@@ -122,7 +125,7 @@ jobs:
       - name: Upload discovery package
         uses: actions/upload-artifact@v4
         with:
-          name: ce7-discovery
+          name: ce7-discovery-expanded
           path: out
           if-no-files-found: error
           retention-days: 1
