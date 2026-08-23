@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Terrain-aware solar illumination analysis for the publicly discussed CE-7 site.
+
+This script is designed for a reproducible CI run with local GeoTIFFs and
+SPICE kernels. It deliberately keeps the mission/site status and terrain
+limitations explicit in every output.
+"""
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import json
+import math
+import os
+import shutil
+import sys
+from dataclasses import dataclass
+from datetime import timedelta
+from pathlib import Path
+from typing import Any, Iterable
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+from matplotlib.colors import LightSource
+import numpy as np
+import pandas as pd
+from osgeo import gdal
+from scipy.ndimage import maximum_filter1d
+import spiceypy as spice
+
+
+R_MOON_M = 1_737_400.0
+SITE_LAT_DEG = -88.8
+SITE_LON_EAST_DEG = 123.5
+OBSERVER_HEIGHT_M = 1.5
+AZ_BIN_DEG = 0.1
+TIME_STEP_MIN = 10
+START_UTC = "2025-12-01T00:00:00Z"
+END_UTC = "2029-02-01T00:00:00Z"  # exclusive
+
+
+@dataclass(frozen=True)
+class TerrainLevel:
+    path: Path
+    minimum_distance_m: float
+    maximum_distance_m: float
+    label: str
+    nominal_cell_m: float
+
+
+@dataclass
+class HorizonProfile:
+    azimuth_deg: np.ndarray
+    raw_elevation_deg: np.ndarray
+    elevation_deg: np.ndarray
+    controlling_distance_m: np.ndarray
+    controlling_surface_elevation_m: np.ndarray
+    controlling_source: np.ndarray
+
+
+def polar_xy_from_lon_lat(lon_east_deg: float, lat_deg: float) -> tuple[float, float]:
+    """Spherical south-polar stereographic coordinates used by PGDA products."""
+    lon = math.radians(lon_east_deg)
+    lat = math.radians(lat_deg)
+    rho = 2.0 * R_MOON_M * math.tan(math.pi / 4.0 + lat / 2.0)
+    return rho * math.sin(lon), rho * math.cos(lon)
+
+
+def lon_lat_from_polar_xy(x_m: np.ndarray, y_m: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    rho = np.hypot(x_m, y_m)
+    lon = np.arctan2(x_m, y_m)
+    lat = 2.0 * np.arctan2(rho, 2.0 * R_MOON_M) - math.pi / 2.0
+    return lon, lat
+
+
+def unit_vector(lon_rad: np.ndarray | float, lat_rad: np.ndarray | float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    cos_lat = np.cos(lat_rad)
+    return cos_lat * np.cos(lon_rad), cos_lat * np.sin(lon_rad), np.sin(lat_rad)
+
+
+def local_basis(lon_east_deg: float, lat_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    lon = math.radians(lon_east_deg)
+    lat = math.radians(lat_deg)
+    up = np.array([math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)], dtype=float)
+    east = np.array([-math.sin(lon), math.cos(lon), 0.0], dtype=float)
+    north = np.array([-math.sin(lat) * math.cos(lon), -math.sin(lat) * math.sin(lon), math.cos(lat)], dtype=float)
+    return up, east, north
+
+
+def invert_geotransform(gt: tuple[float, ...]) -> tuple[float, ...]:
+    inv = gdal.InvGeoTransform(gt)
+    if inv is None:
+        raise RuntimeError(f"Could not invert geotransform: {gt}")
+    return inv
+
+
+def pixel_from_xy(ds: gdal.Dataset, x_m: float, y_m: float) -> tuple[float, float]:
+    inv = invert_geotransform(ds.GetGeoTransform())
+    px, py = gdal.ApplyGeoTransform(inv, x_m, y_m)
+    return float(px), float(py)
+
+
+def bilinear_sample(ds: gdal.Dataset, x_m: float, y_m: float) -> float:
+    px, py = pixel_from_xy(ds, x_m, y_m)
+    if not (0 <= px < ds.RasterXSize - 1 and 0 <= py < ds.RasterYSize - 1):
+        raise ValueError(f"Point ({x_m}, {y_m}) lies outside {ds.GetDescription()}")
+    x0 = int(math.floor(px))
+    y0 = int(math.floor(py))
+    arr = ds.GetRasterBand(1).ReadAsArray(x0, y0, 2, 2).astype(float)
+    fx = px - x0
+    fy = py - y0
+    if not np.all(np.isfinite(arr)):
+        finite = arr[np.isfinite(arr)]
+        if not finite.size:
+            raise ValueError("All DEM samples around site are non-finite")
+        return float(np.mean(finite))
+    return float(
+        arr[0, 0] * (1 - fx) * (1 - fy)
+        + arr[0, 1] * fx * (1 - fy)
+        + arr[1, 0] * (1 - fx) * fy
+        + arr[1, 1] * fx * fy
+    )
+
+
+def ensure_north_up(ds: gdal.Dataset) -> None:
+    gt = ds.GetGeoTransform()
+    if abs(gt[2]) > 1e-12 or abs(gt[4]) > 1e-12 or gt[1] <= 0 or gt[5] >= 0:
+        raise ValueError(f"Expected north-up raster; got geotransform {gt}")
+
+
+def update_horizon_groups(
+    horizon: np.ndarray,
+    control_distance: np.ndarray,
+    control_z: np.ndarray,
+    control_source: np.ndarray,
+    bin_index: np.ndarray,
+    altitude_deg: np.ndarray,
+    distance_m: np.ndarray,
+    surface_z_m: np.ndarray,
+    source_label: str,
+) -> None:
+    if bin_index.size == 0:
+        return
+    order = np.argsort(bin_index, kind="mergesort")
+    b = bin_index[order]
+    a = altitude_deg[order]
+    d = distance_m[order]
+    z = surface_z_m[order]
+    starts = np.r_[0, np.flatnonzero(np.diff(b)) + 1]
+    ends = np.r_[starts[1:], b.size]
+    unique_bins = b[starts]
+    candidates = np.maximum.reduceat(a, starts)
+    better = candidates > horizon[unique_bins]
+    for start, end, bin_no, is_better in zip(starts, ends, unique_bins, better, strict=True):
+        if not is_better:
+            continue
+        local = int(np.argmax(a[start:end])) + int(start)
+        horizon[bin_no] = a[local]
+        control_distance[bin_no] = d[local]
+        control_z[bin_no] = z[local]
+        control_source[bin_no] = source_label
+
+
+def build_horizon(
+    levels: list[TerrainLevel],
+    site_surface_elevation_m: float,
+    observer_height_m: float,
+    chunk_rows: int = 128,
+) -> HorizonProfile:
+    x0, y0 = polar_xy_from_lon_lat(SITE_LON_EAST_DEG, SITE_LAT_DEG)
+    up, east, north = local_basis(SITE_LON_EAST_DEG, SITE_LAT_DEG)
+    observer = (R_MOON_M + site_surface_elevation_m + observer_height_m) * up
+
+    n_bins = int(round(360.0 / AZ_BIN_DEG))
+    horizon = np.full(n_bins, -np.inf, dtype=np.float64)
+    control_distance = np.full(n_bins, np.nan, dtype=np.float64)
+    control_z = np.full(n_bins, np.nan, dtype=np.float64)
+    control_source = np.full(n_bins, "", dtype=object)
+
+    for level in levels:
+        ds = gdal.Open(str(level.path), gdal.GA_ReadOnly)
+        if ds is None:
+            raise FileNotFoundError(level.path)
+        ensure_north_up(ds)
+        band = ds.GetRasterBand(1)
+        nodata = band.GetNoDataValue()
+        gt = ds.GetGeoTransform()
+        x_centers = gt[0] + (np.arange(ds.RasterXSize, dtype=np.float64) + 0.5) * gt[1]
+        dx_all = x_centers - x0
+        min2 = level.minimum_distance_m ** 2
+        max2 = level.maximum_distance_m ** 2
+
+        print(
+            f"Horizon level {level.label}: {ds.RasterXSize}x{ds.RasterYSize}, "
+            f"{level.minimum_distance_m/1000:.1f}-{level.maximum_distance_m/1000:.1f} km",
+            flush=True,
+        )
+        for yoff in range(0, ds.RasterYSize, chunk_rows):
+            rows = min(chunk_rows, ds.RasterYSize - yoff)
+            z_grid = band.ReadAsArray(0, yoff, ds.RasterXSize, rows).astype(np.float64)
