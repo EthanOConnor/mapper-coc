@@ -1,82 +1,175 @@
-name: CE7 High-Resolution Terrain Probe
+name: CE7 Final Terrain-Aware Illumination
 
 on:
   push:
     branches: [tmp/ce7-illumination-20260822]
-  pull_request:
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  probe:
+  build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 180
+    env:
+      OMP_NUM_THREADS: 4
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      NUMEXPR_NUM_THREADS: 4
     steps:
       - uses: actions/checkout@v6
-      - name: Install GDAL tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal python3-numpy
-      - name: Probe cloud-optimized DEMs
+
+      - name: Free runner disk and install analysis dependencies
         shell: bash
-        env:
-          CPL_VSIL_CURL_ALLOWED_EXTENSIONS: .tif,.TIF
-          GDAL_HTTP_MULTIRANGE: YES
-          VSI_CACHE: TRUE
-          VSI_CACHE_SIZE: 50000000
         run: |
           set -euxo pipefail
-          mkdir -p out
-          /usr/bin/python3 - <<'PY'
-          import json
-          from pathlib import Path
-          from osgeo import gdal, osr
-          gdal.UseExceptions()
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl gdal-bin python3-gdal python3-numpy python3-pip unzip zip
+          /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir \
+            pandas matplotlib scipy spiceypy pillow
+          df -h
 
-          urls = {
-            'LOLA_5m_87S': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif',
-            'LOLA_10m_83S': 'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_83S_10MPP_ADJ.TIF',
-            'LOLA_20m_80S': 'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ.TIF',
+      - name: Reconstruct and validate analysis source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build
+          cat .github/ce7_analysis_parts/*.part > build/ce7_analysis.py
+          echo 'aa657607532d053dcbfac28e43f8e876f2c39f003491667503992407b46646c5  build/ce7_analysis.py' | sha256sum -c -
+          /usr/bin/python3 -m py_compile build/ce7_analysis.py
+          wc -l -c build/ce7_analysis.py
+
+      - name: Download public terrain and SPICE kernels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p source terrain kernels out
+          download() {
+            url="$1"
+            output="$2"
+            curl --fail --location --retry 10 --retry-delay 5 --retry-all-errors \
+              --connect-timeout 30 --speed-time 120 --speed-limit 1024 \
+              --continue-at - --output "$output" "$url"
           }
-          lat, lon = -88.8, 123.5
-          results = []
-          for name, url in urls.items():
-              path = '/vsicurl/' + url
-              ds = gdal.Open(path)
-              band = ds.GetRasterBand(1)
-              dst = osr.SpatialReference(); dst.ImportFromWkt(ds.GetProjection()); dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-              src = osr.SpatialReference(); src.ImportFromProj4('+proj=longlat +R=1737400 +no_defs'); src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-              ct = osr.CoordinateTransformation(src, dst)
-              x, y, _ = ct.TransformPoint(lon, lat)
-              inv = gdal.InvGeoTransform(ds.GetGeoTransform())
-              px, py = gdal.ApplyGeoTransform(inv, x, y)
-              inside = 0 <= px < ds.RasterXSize and 0 <= py < ds.RasterYSize
-              value = float(band.ReadAsArray(int(px), int(py), 1, 1)[0,0]) if inside else None
-              # Sample a 2 km square around the site at native resolution where practical.
-              half_px = max(1, round(1000 / abs(ds.GetGeoTransform()[1])))
-              xoff = max(0, int(px)-half_px); yoff = max(0, int(py)-half_px)
-              xsize = min(ds.RasterXSize-xoff, 2*half_px+1); ysize = min(ds.RasterYSize-yoff, 2*half_px+1)
-              arr = band.ReadAsArray(xoff, yoff, xsize, ysize)
-              stats = {
-                  'min': float(arr.min()), 'max': float(arr.max()),
-                  'mean': float(arr.mean()), 'std': float(arr.std()),
-              }
-              results.append({
-                  'name': name, 'url': url, 'raster_size': [ds.RasterXSize, ds.RasterYSize],
-                  'geotransform': list(ds.GetGeoTransform()), 'projection_wkt': ds.GetProjection(),
-                  'site_xy_m': [x,y], 'site_pixel': [px,py], 'inside': inside,
-                  'site_elevation_m': value, 'local_2km_stats': stats,
-                  'nodata': band.GetNoDataValue(), 'metadata': ds.GetMetadata(),
-              })
-          Path('out/highres_probe.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
-          print(json.dumps(results, indent=2))
+
+          download 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif' \
+            source/ldem_87s_5mpp.tif
+          download 'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_83S_10MPP_ADJ.TIF' \
+            source/LDEM_83S_10MPP_ADJ.TIF
+          download 'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF' \
+            source/LDEM_80S_80MPP_ADJ.TIF
+
+          download 'https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls' \
+            kernels/naif0012.tls
+          download 'https://naif.jpl.nasa.gov/pub/naif/MAVEN/kernels/spk/de421.bsp' \
+            kernels/de421.bsp
+          download 'https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00010.tpc' \
+            kernels/pck00010.tpc
+          download 'https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/moon_pa_de421_1900-2050.bpc' \
+            kernels/moon_pa_de421_1900-2050.bpc
+          download 'https://naif.jpl.nasa.gov/pub/naif/generic_kernels/fk/satellites/moon_080317.tf' \
+            kernels/moon_080317.tf
+
+          ls -lh source kernels
+          gdalinfo source/ldem_87s_5mpp.tif | sed -n '1,100p'
+          gdalinfo source/LDEM_83S_10MPP_ADJ.TIF | sed -n '1,100p'
+          gdalinfo source/LDEM_80S_80MPP_ADJ.TIF | sed -n '1,100p'
+          sha256sum source/* kernels/* > build/input_SHA256SUMS.txt
+          df -h
+
+      - name: Build nested terrain grids
+        shell: bash
+        run: |
+          set -euxo pipefail
+          COMMON=(-overwrite -multi -wo NUM_THREADS=ALL_CPUS -wm 2048 \
+            -dstnodata nan -co TILED=YES -co COMPRESS=DEFLATE -co PREDICTOR=3 \
+            -co BIGTIFF=IF_SAFER -co NUM_THREADS=ALL_CPUS)
+
+          # Native 5 m terrain within roughly 3 km of the modeled point.
+          gdalwarp "${COMMON[@]}" -r near -tr 5 5 -tap \
+            -te 27340 -23085 33345 -17080 \
+            source/ldem_87s_5mpp.tif terrain/near5.tif
+
+          # Preserve local ridge tops when reducing the 5 m mosaic to 10 m.
+          gdalwarp "${COMMON[@]}" -r max -tr 10 10 -tap \
+            -te 5340 -45090 55350 4920 \
+            source/ldem_87s_5mpp.tif terrain/mid10.tif
+
+          # Wider regional horizon from the adjusted 10 m DEM, maximum-pooled to 40 m.
+          gdalwarp "${COMMON[@]}" -r max -tr 40 40 -tap \
+            -te -119680 -170120 180360 129920 \
+            source/LDEM_83S_10MPP_ADJ.TIF terrain/region40.tif
+
+          # Far horizon from the complete 80 m south-pole DEM, maximum-pooled to 240 m.
+          gdalwarp "${COMMON[@]}" -r max -tr 240 240 -tap \
+            source/LDEM_80S_80MPP_ADJ.TIF terrain/far240.tif
+
+          for f in terrain/*.tif; do
+            gdalinfo -stats "$f" > "build/$(basename "$f").gdalinfo.txt"
+          done
+          ls -lh terrain
+          df -h
+
+      - name: Calculate terrain horizon and solar visibility
+        shell: bash
+        run: |
+          set -euxo pipefail
+          /usr/bin/python3 build/ce7_analysis.py \
+            --near5 terrain/near5.tif \
+            --mid10 terrain/mid10.tif \
+            --region40 terrain/region40.tif \
+            --far240 terrain/far240.tif \
+            --kernels kernels \
+            --out out
+          cp build/ce7_analysis.py out/ce7_analysis_source.py
+          cp build/input_SHA256SUMS.txt out/input_SHA256SUMS.txt
+          cp build/*.gdalinfo.txt out/
+
+      - name: Validate and package outputs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -s out/ce7_terrain_illumination_2025-2029.png
+          test -s out/ce7_terrain_illumination_2025-2029.svg
+          test -s out/ce7_illumination_10min.csv.gz
+          test -s out/analysis_metadata.json
+          gzip -t out/ce7_illumination_10min.csv.gz
+          file out/*.png out/*.svg out/*.csv.gz
+          /usr/bin/python3 - <<'PY'
+          import gzip, json
+          from pathlib import Path
+          from PIL import Image
+
+          out = Path('out')
+          image = Image.open(out / 'ce7_terrain_illumination_2025-2029.png')
+          image.verify()
+          print('main image size:', Image.open(out / 'ce7_terrain_illumination_2025-2029.png').size)
+          with gzip.open(out / 'ce7_illumination_10min.csv.gz', 'rt') as f:
+              rows = sum(1 for _ in f) - 1
+          metadata = json.loads((out / 'analysis_metadata.json').read_text())
+          print('timeseries rows:', rows)
+          print('summary:', json.dumps(metadata['summary'], indent=2))
+          if rows != metadata['summary']['sample_count']:
+              raise SystemExit('CSV row count does not match metadata')
+          if rows < 150000:
+              raise SystemExit('Unexpectedly short output')
           PY
-      - uses: actions/upload-artifact@v4
+          (cd out && sha256sum -c SHA256SUMS.txt)
+          zip -r -6 CE7_terrain_illumination_package.zip out
+          unzip -t CE7_terrain_illumination_package.zip
+          sha256sum CE7_terrain_illumination_package.zip > CE7_terrain_illumination_package.zip.sha256
+          ls -lh out CE7_terrain_illumination_package.zip*
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@v4
         with:
-          name: ce7-highres-terrain-probe
-          path: out
+          name: ce7-final-illumination
+          path: |
+            out
+            CE7_terrain_illumination_package.zip
+            CE7_terrain_illumination_package.zip.sha256
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 2
