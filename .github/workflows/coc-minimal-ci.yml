@@ -3,6 +3,8 @@ name: CE7 Source and Terrain Discovery
 on:
   push:
     branches: [tmp/ce7-illumination-20260822]
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -43,7 +45,6 @@ jobs:
           import pathlib
           import re
           import requests
-          from urllib.parse import urlsplit
 
           out = pathlib.Path('out')
           texts = []
@@ -57,12 +58,11 @@ jobs:
           text = '\n'.join(texts)
 
           urls = set()
-          for match in re.findall(r'https?[^\s"\'<>]+', text):
+          for match in re.findall(r"https?[^\s\"'<>]+", text):
               u = html.unescape(match).replace('\\/', '/').rstrip('},])\\')
               if any(host in u for host in ('pbs.twimg.com', 'video.twimg.com', 'twimg.com/media')):
                   urls.add(u)
 
-          # Also walk valid JSON structures, which avoids regex escaping artifacts.
           def walk(x):
               if isinstance(x, dict):
                   for v in x.values():
