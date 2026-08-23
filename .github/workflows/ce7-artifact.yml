@@ -1,0 +1,38 @@
+name: CE7 terrain artifact
+
+on:
+  push:
+    branches:
+      - tmp/ce7-illumination-artifact-20260823
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install analysis dependencies
+        run: >-
+          python -m pip install --upgrade
+          pip numpy pandas matplotlib pillow tabulate
+          rasterio pyproj spiceypy requests
+      - name: Build CE-7 terrain illumination package
+        env:
+          MPLBACKEND: Agg
+        run: python tmp/ce7_build.py
+      - name: Upload verified attachment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ce7-illumination-verified
+          path: ce7_output
+          if-no-files-found: error
+          retention-days: 3
