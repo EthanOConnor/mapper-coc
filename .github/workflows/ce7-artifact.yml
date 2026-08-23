@@ -74,21 +74,21 @@ jobs:
                               'dtype': src.dtypes[0],
                               'nodata': src.nodata,
                               'crs': src.crs.to_string() if src.crs else None,
-                              'bounds': list(src.bounds),
-                              'transform': list(src.transform)[:6],
+                              'bounds': [float(v) for v in src.bounds],
+                              'transform': [float(v) for v in list(src.transform)[:6]],
                               'block_shapes': [list(v) for v in src.block_shapes],
                           })
                           if src.crs:
                               geog = src.crs.geodetic_crs
                               transformer = Transformer.from_crs(geog, src.crs, always_xy=True)
                               x, y = transformer.transform(lon, lat)
-                              rec['site_xy'] = [x, y]
+                              rec['site_xy'] = [float(x), float(y)]
                               rec['site_inside_bounds'] = bool(
                                   src.bounds.left <= x <= src.bounds.right and
                                   src.bounds.bottom <= y <= src.bounds.top
                               )
                               if rec['site_inside_bounds']:
-                                  rec['site_sample'] = list(next(src.sample([(x, y)])))
+                                  rec['site_sample'] = [float(v) for v in next(src.sample([(x, y)]))]
               except Exception as exc:
                   rec['raster_error'] = repr(exc)
               result['rasters'][name] = rec
@@ -114,7 +114,7 @@ jobs:
                   if r.ok and ('json' in (r.headers.get('content-type') or '') or r.text.lstrip().startswith('{')):
                       try:
                           data = r.json()
-                          (out / f'tweet_{i}.json').write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+                          (out / f'tweet_{i}.json').write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding='utf-8')
                           media_urls = []
                           def walk(obj):
                               if isinstance(obj, dict):
@@ -145,8 +145,9 @@ jobs:
               except Exception as exc:
                   result['tweet'][str(i)] = {'url': url, 'error': repr(exc)}
 
-          (out / 'discovery.json').write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')
-          print(json.dumps(result, indent=2, ensure_ascii=False))
+          rendered = json.dumps(result, indent=2, ensure_ascii=False, default=str)
+          (out / 'discovery.json').write_text(rendered, encoding='utf-8')
+          print(rendered)
           PY
       - name: Upload discovery artifact
         uses: actions/upload-artifact@v4
