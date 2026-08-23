@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - tmp/ce7-illumination-artifact-20260823
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -27,9 +29,7 @@ jobs:
           mkdir -p ce7_discovery
           python - <<'PY'
           import json
-          import os
           from pathlib import Path
-          from urllib.parse import urlparse
 
           import requests
           import rasterio
@@ -133,8 +133,10 @@ jobs:
                                   if mr.ok and mr.content:
                                       ctype = mr.headers.get('content-type') or ''
                                       ext = '.jpg'
-                                      if 'png' in ctype: ext = '.png'
-                                      elif 'webp' in ctype: ext = '.webp'
+                                      if 'png' in ctype:
+                                          ext = '.png'
+                                      elif 'webp' in ctype:
+                                          ext = '.webp'
                                       (out / f'reference_{i}_{j}{ext}').write_bytes(mr.content)
                               except Exception:
                                   pass
