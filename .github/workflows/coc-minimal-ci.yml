@@ -1,4 +1,4 @@
-name: CE7 Terrain Inspection
+name: CE7 Five-Metre Terrain Inspection
 
 on:
   push:
@@ -13,108 +13,60 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
-
       - name: Install GDAL tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal python3-numpy
-
-      - name: Download and inspect public terrain models
+      - name: Inspect Site04 5 m terrain tile
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p terrain report quicklooks
-
-          curl -L --retry 3 --retry-delay 2 \
-            'https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/SDP/NAC_DTM/ESALL_SR12/NAC_DTM_ESALL_SR12.TIF' \
-            -o terrain/NAC_DTM_ESALL_SR12.TIF
           curl -L --retry 3 --retry-delay 2 \
             'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif' \
             -o terrain/Site04_final_adj_5mpp_surf.tif
-          curl -L --retry 3 --retry-delay 2 \
-            'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF' \
-            -o terrain/LDEM_80S_80MPP_ADJ.TIF
-
-          for f in terrain/*.TIF; do
-            base="$(basename "$f" .TIF)"
-            gdalinfo -json -stats "$f" > "report/${base}.gdalinfo.json"
-            gdalinfo "$f" > "report/${base}.gdalinfo.txt"
-          done
-
+          gdalinfo -json -stats terrain/Site04_final_adj_5mpp_surf.tif > report/Site04.gdalinfo.json
+          gdalinfo terrain/Site04_final_adj_5mpp_surf.tif > report/Site04.gdalinfo.txt
           /usr/bin/python3 - <<'PY'
           import json
-          import math
           from pathlib import Path
           from osgeo import gdal, osr
-
           gdal.UseExceptions()
-          lat, lon = -88.8, 123.5
-          rows = []
-          for path in sorted(Path('terrain').glob('*.TIF')):
-              ds = gdal.Open(str(path))
-              dst = osr.SpatialReference()
-              dst.ImportFromWkt(ds.GetProjection())
-              dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-              src = osr.SpatialReference()
-              src.ImportFromProj4('+proj=longlat +R=1737400 +no_defs')
-              src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-              try:
-                  transform = osr.CoordinateTransformation(src, dst)
-                  x, y, _ = transform.TransformPoint(lon, lat)
-                  inv = gdal.InvGeoTransform(ds.GetGeoTransform())
-                  px, py = gdal.ApplyGeoTransform(inv, x, y)
-                  inside = 0 <= px < ds.RasterXSize and 0 <= py < ds.RasterYSize
-              except Exception as e:
-                  x = y = px = py = float('nan')
-                  inside = False
-              band = ds.GetRasterBand(1)
-              value = None
-              if inside:
-                  value = float(band.ReadAsArray(int(px), int(py), 1, 1)[0, 0])
-                  # Quicklook centered on the site, retaining source detail before downsampling.
-                  half = min(5000, int(px), int(py), ds.RasterXSize-int(px)-1, ds.RasterYSize-int(py)-1)
-                  half = max(256, half)
-                  xoff = max(0, int(px)-half)
-                  yoff = max(0, int(py)-half)
-                  xsize = min(ds.RasterXSize-xoff, 2*half)
-                  ysize = min(ds.RasterYSize-yoff, 2*half)
-                  opts = gdal.TranslateOptions(
-                      format='PNG', srcWin=[xoff,yoff,xsize,ysize], width=1200,
-                      outputType=gdal.GDT_Byte, scaleParams=[[]]
-                  )
-                  try:
-                      gdal.Translate(f'quicklooks/{path.stem}.png', ds, options=opts)
-                  except Exception:
-                      pass
-              rows.append({
-                  'file': path.name,
-                  'raster_size': [ds.RasterXSize, ds.RasterYSize],
-                  'geotransform': list(ds.GetGeoTransform()),
-                  'projection_wkt': ds.GetProjection(),
-                  'site_lon_east_deg': lon,
-                  'site_lat_deg': lat,
-                  'site_projected_xy': [x,y],
-                  'site_pixel_xy': [px,py],
-                  'inside': inside,
-                  'site_value_raw': value,
-                  'unit_type': band.GetUnitType(),
-                  'nodata': band.GetNoDataValue(),
-                  'metadata': ds.GetMetadata(),
-              })
-          Path('report/site_coverage.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
-          print(json.dumps(rows, indent=2))
+          path='terrain/Site04_final_adj_5mpp_surf.tif'
+          ds=gdal.Open(path)
+          lat,lon=-88.8,123.5
+          dst=osr.SpatialReference(); dst.ImportFromWkt(ds.GetProjection()); dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+          src=osr.SpatialReference(); src.ImportFromProj4('+proj=longlat +R=1737400 +no_defs'); src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+          ct=osr.CoordinateTransformation(src,dst)
+          x,y,_=ct.TransformPoint(lon,lat)
+          inv=gdal.InvGeoTransform(ds.GetGeoTransform())
+          px,py=gdal.ApplyGeoTransform(inv,x,y)
+          inside=0<=px<ds.RasterXSize and 0<=py<ds.RasterYSize
+          band=ds.GetRasterBand(1)
+          value=float(band.ReadAsArray(int(px),int(py),1,1)[0,0]) if inside else None
+          report={
+            'file':Path(path).name,'raster_size':[ds.RasterXSize,ds.RasterYSize],
+            'geotransform':list(ds.GetGeoTransform()),'projection_wkt':ds.GetProjection(),
+            'site_lon_east_deg':lon,'site_lat_deg':lat,'site_projected_xy':[x,y],
+            'site_pixel_xy':[px,py],'inside':inside,'site_value_raw':value,
+            'nodata':band.GetNoDataValue(),'metadata':ds.GetMetadata(),
+          }
+          Path('report/site04_coverage.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+          print(json.dumps(report,indent=2))
+          if inside:
+            half=min(6000,int(px),int(py),ds.RasterXSize-int(px)-1,ds.RasterYSize-int(py)-1)
+            xoff=max(0,int(px)-half); yoff=max(0,int(py)-half)
+            xsize=min(ds.RasterXSize-xoff,2*half); ysize=min(ds.RasterYSize-yoff,2*half)
+            gdal.Translate('quicklooks/Site04_site.png',ds,options=gdal.TranslateOptions(
+              format='PNG',srcWin=[xoff,yoff,xsize,ysize],width=1600,outputType=gdal.GDT_Byte,scaleParams=[[]]))
           PY
-
-          sha256sum terrain/*.TIF > report/terrain_sha256.txt
-          du -h terrain/* report/* quicklooks/* 2>/dev/null | sort -h > report/file_sizes.txt
-
-      - name: Upload terrain inspection
-        uses: actions/upload-artifact@v4
+          sha256sum terrain/Site04_final_adj_5mpp_surf.tif > report/terrain_sha256.txt
+      - uses: actions/upload-artifact@v4
         with:
-          name: ce7-terrain-inspection
+          name: ce7-site04-inspection
           path: |
             report
             quicklooks
