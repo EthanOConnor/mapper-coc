@@ -12,147 +12,27 @@ permissions:
   contents: read
 
 jobs:
-  discover:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install discovery dependencies
-        run: python -m pip install --upgrade pip rasterio pyproj requests
-      - name: Probe terrain coverage and reference post
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ce7_discovery
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          import requests
-          import rasterio
-          from pyproj import Transformer
-
-          out = Path('ce7_discovery')
-          out.mkdir(exist_ok=True)
-          lat, lon = -88.8, 123.4
-          urls = {
-              'site01_5m': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_surf.tif',
-              'site04_5m': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif',
-              'site06_5m': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site06/Site06_final_adj_5mpp_surf.tif',
-              'site07_5m': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site07/Site07_final_adj_5mpp_surf.tif',
-              'site42_5m': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site42/Site42_final_adj_5mpp_surf.tif',
-              'south87_5m': 'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif',
-              'south83_10m': 'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_83S_10MPP_ADJ.TIF',
-              'south80_80m': 'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF',
-          }
-          result = {'site': {'lat_deg': lat, 'lon_east_deg': lon}, 'rasters': {}, 'tweet': {}}
-          env_opts = {
-              'GDAL_DISABLE_READDIR_ON_OPEN': 'EMPTY_DIR',
-              'CPL_VSIL_CURL_ALLOWED_EXTENSIONS': '.tif,.TIF',
-              'GDAL_HTTP_MULTIRANGE': 'YES',
-              'GDAL_HTTP_MERGE_CONSECUTIVE_RANGES': 'YES',
-          }
-          for name, url in urls.items():
-              rec = {'url': url}
-              try:
-                  h = requests.head(url, timeout=30, allow_redirects=True)
-                  rec['head_status'] = h.status_code
-                  rec['content_length'] = h.headers.get('content-length')
-                  rec['accept_ranges'] = h.headers.get('accept-ranges')
-              except Exception as exc:
-                  rec['head_error'] = repr(exc)
-              try:
-                  with rasterio.Env(**env_opts):
-                      with rasterio.open('/vsicurl/' + url) as src:
-                          rec.update({
-                              'width': src.width,
-                              'height': src.height,
-                              'count': src.count,
-                              'dtype': src.dtypes[0],
-                              'nodata': src.nodata,
-                              'crs': src.crs.to_string() if src.crs else None,
-                              'bounds': [float(v) for v in src.bounds],
-                              'transform': [float(v) for v in list(src.transform)[:6]],
-                              'block_shapes': [list(v) for v in src.block_shapes],
-                          })
-                          if src.crs:
-                              geog = src.crs.geodetic_crs
-                              transformer = Transformer.from_crs(geog, src.crs, always_xy=True)
-                              x, y = transformer.transform(lon, lat)
-                              rec['site_xy'] = [float(x), float(y)]
-                              rec['site_inside_bounds'] = bool(
-                                  src.bounds.left <= x <= src.bounds.right and
-                                  src.bounds.bottom <= y <= src.bounds.top
-                              )
-                              if rec['site_inside_bounds']:
-                                  rec['site_sample'] = [float(v) for v in next(src.sample([(x, y)]))]
-              except Exception as exc:
-                  rec['raster_error'] = repr(exc)
-              result['rasters'][name] = rec
-
-          tweet_urls = [
-              'https://api.fxtwitter.com/SegerYU/status/2091250852568932449',
-              'https://api.vxtwitter.com/SegerYU/status/2091250852568932449',
-              'https://cdn.syndication.twimg.com/tweet-result?id=2091250852568932449&lang=en',
-          ]
-          sess = requests.Session()
-          sess.headers['User-Agent'] = 'Mozilla/5.0 CE7 illumination research'
-          for i, url in enumerate(tweet_urls):
-              try:
-                  r = sess.get(url, timeout=30)
-                  rec = {
-                      'url': url,
-                      'status': r.status_code,
-                      'content_type': r.headers.get('content-type'),
-                      'length': len(r.content),
-                      'text_prefix': r.text[:1000] if 'text' in (r.headers.get('content-type') or '') or 'json' in (r.headers.get('content-type') or '') else None,
-                  }
-                  result['tweet'][str(i)] = rec
-                  if r.ok and ('json' in (r.headers.get('content-type') or '') or r.text.lstrip().startswith('{')):
-                      try:
-                          data = r.json()
-                          (out / f'tweet_{i}.json').write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding='utf-8')
-                          media_urls = []
-                          def walk(obj):
-                              if isinstance(obj, dict):
-                                  for k, v in obj.items():
-                                      if isinstance(v, str) and v.startswith('http') and any(x in k.lower() for x in ('url', 'media', 'photo', 'image')):
-                                          if any(ext in v.lower() for ext in ('.jpg', '.jpeg', '.png', '.webp', 'pbs.twimg.com/media')):
-                                              media_urls.append(v)
-                                      walk(v)
-                              elif isinstance(obj, list):
-                                  for v in obj:
-                                      walk(v)
-                          walk(data)
-                          for j, media_url in enumerate(dict.fromkeys(media_urls)):
-                              try:
-                                  mr = sess.get(media_url, timeout=60)
-                                  if mr.ok and mr.content:
-                                      ctype = mr.headers.get('content-type') or ''
-                                      ext = '.jpg'
-                                      if 'png' in ctype:
-                                          ext = '.png'
-                                      elif 'webp' in ctype:
-                                          ext = '.webp'
-                                      (out / f'reference_{i}_{j}{ext}').write_bytes(mr.content)
-                              except Exception:
-                                  pass
-                      except Exception as exc:
-                          rec['json_error'] = repr(exc)
-              except Exception as exc:
-                  result['tweet'][str(i)] = {'url': url, 'error': repr(exc)}
-
-          rendered = json.dumps(result, indent=2, ensure_ascii=False, default=str)
-          (out / 'discovery.json').write_text(rendered, encoding='utf-8')
-          print(rendered)
-          PY
-      - name: Upload discovery artifact
+      - name: Install analysis dependencies
+        run: >-
+          python -m pip install --upgrade
+          pip numpy pandas matplotlib pillow tabulate
+          rasterio pyproj spiceypy requests
+      - name: Build CE-7 terrain illumination package
+        env:
+          MPLBACKEND: Agg
+        run: python tmp/ce7_build.py
+      - name: Upload verified attachment package
         uses: actions/upload-artifact@v4
         with:
-          name: ce7-discovery
-          path: ce7_discovery
+          name: ce7-illumination-verified
+          path: ce7_output
           if-no-files-found: error
           retention-days: 3
