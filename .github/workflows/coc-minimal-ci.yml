@@ -1,4 +1,4 @@
-name: CE7 Source and Terrain Discovery
+name: CE7 Terrain Inspection
 
 on:
   push:
@@ -11,121 +11,112 @@ permissions:
   contents: read
 
 jobs:
-  discover:
+  inspect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
-      - name: Recover source post, related site map, and media
+      - name: Install GDAL tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal python3-numpy
+
+      - name: Download and inspect public terrain models
         shell: bash
         run: |
-          set -u
-          mkdir -p out/media
+          set -euxo pipefail
+          mkdir -p terrain report quicklooks
 
-          fetch() {
-            name="$1"
-            url="$2"
-            echo "Fetching ${url}"
-            curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 \
-              -sS -D "out/${name}.headers" "$url" -o "out/${name}" || true
-            wc -c "out/${name}" 2>/dev/null || true
-          }
+          curl -L --retry 3 --retry-delay 2 \
+            'https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/SDP/NAC_DTM/ESALL_SR12/NAC_DTM_ESALL_SR12.TIF' \
+            -o terrain/NAC_DTM_ESALL_SR12.TIF
+          curl -L --retry 3 --retry-delay 2 \
+            'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif' \
+            -o terrain/Site04_final_adj_5mpp_surf.tif
+          curl -L --retry 3 --retry-delay 2 \
+            'https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF' \
+            -o terrain/LDEM_80S_80MPP_ADJ.TIF
 
-          fetch chart_post.json 'https://api.fxtwitter.com/SegerYU/status/2091250852568932449'
-          fetch timeline.json 'https://api.fxtwitter.com/2/profile/SegerYU/statuses?count=100&with_replies=1'
-          curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 -sS -G \
-            --data-urlencode 'q=from:SegerYU 嫦娥七号' \
-            --data-urlencode 'feed=latest' --data-urlencode 'count=100' \
-            'https://api.fxtwitter.com/2/search' -o out/search_ce7.json || true
-          curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 -sS -G \
-            --data-urlencode 'q=from:SegerYU 36 km' \
-            --data-urlencode 'feed=latest' --data-urlencode 'count=100' \
-            'https://api.fxtwitter.com/2/search' -o out/search_36km.json || true
-          curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 180 -sS -G \
-            --data-urlencode 'q=嫦娥七号预选着陆点高程图' \
-            --data-urlencode 'feed=latest' --data-urlencode 'count=100' \
-            'https://api.fxtwitter.com/2/search' -o out/search_exact.json || true
+          for f in terrain/*.TIF; do
+            base="$(basename "$f" .TIF)"
+            gdalinfo -json -stats "$f" > "report/${base}.gdalinfo.json"
+            gdalinfo "$f" > "report/${base}.gdalinfo.txt"
+          done
 
-          python3 - <<'PY'
+          /usr/bin/python3 - <<'PY'
           import json
-          import pathlib
-          import requests
+          import math
+          from pathlib import Path
+          from osgeo import gdal, osr
 
-          out = pathlib.Path('out')
-          media_urls = set()
-          posts = []
-
-          def walk(x):
-              if isinstance(x, dict):
-                  if isinstance(x.get('id'), str) and isinstance(x.get('text'), str):
-                      posts.append({
-                          'id': x.get('id'), 'url': x.get('url'), 'text': x.get('text'),
-                          'created_at': x.get('created_at'),
-                          'author': (x.get('author') or {}).get('screen_name') if isinstance(x.get('author'), dict) else None,
-                      })
-                  for k, v in x.items():
-                      if isinstance(v, str) and v.startswith('http') and any(h in v for h in ('pbs.twimg.com', 'video.twimg.com')):
-                          media_urls.add(v)
-                      walk(v)
-              elif isinstance(x, list):
-                  for v in x:
-                      walk(v)
-
-          for p in out.glob('*.json'):
+          gdal.UseExceptions()
+          lat, lon = -88.8, 123.5
+          rows = []
+          for path in sorted(Path('terrain').glob('*.TIF')):
+              ds = gdal.Open(str(path))
+              dst = osr.SpatialReference()
+              dst.ImportFromWkt(ds.GetProjection())
+              dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+              src = osr.SpatialReference()
+              src.ImportFromProj4('+proj=longlat +R=1737400 +no_defs')
+              src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
               try:
-                  walk(json.loads(p.read_text()))
+                  transform = osr.CoordinateTransformation(src, dst)
+                  x, y, _ = transform.TransformPoint(lon, lat)
+                  inv = gdal.InvGeoTransform(ds.GetGeoTransform())
+                  px, py = gdal.ApplyGeoTransform(inv, x, y)
+                  inside = 0 <= px < ds.RasterXSize and 0 <= py < ds.RasterYSize
               except Exception as e:
-                  print('JSON parse failed', p, repr(e))
-
-          # Deduplicate posts while preserving enough evidence for site selection.
-          dedup = {}
-          for p in posts:
-              dedup[p['id']] = p
-          selected = sorted(dedup.values(), key=lambda p: p.get('created_at') or '')
-          (out / 'posts.json').write_text(json.dumps(selected, ensure_ascii=False, indent=2), encoding='utf-8')
-          (out / 'posts.txt').write_text('\n\n'.join(
-              f"{p.get('created_at')} {p.get('id')} {p.get('url')}\n{p.get('text')}" for p in selected
-          ), encoding='utf-8')
-
-          report = []
-          for i, u in enumerate(sorted(media_urls)):
-              try:
-                  r = requests.get(u, timeout=180, headers={'User-Agent': 'Mozilla/5.0'})
-                  ct = r.headers.get('content-type', '')
-                  ext = '.bin'
-                  if 'jpeg' in ct or 'jpg' in ct: ext = '.jpg'
-                  elif 'png' in ct: ext = '.png'
-                  elif 'webp' in ct: ext = '.webp'
-                  elif 'mp4' in ct: ext = '.mp4'
-                  fn = out / 'media' / f'media_{i:03d}{ext}'
-                  fn.write_bytes(r.content)
-                  report.append({'url': u, 'file': str(fn), 'status': r.status_code,
-                                 'content_type': ct, 'bytes': len(r.content)})
-              except Exception as e:
-                  report.append({'url': u, 'error': repr(e)})
-          (out / 'media_report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
-          print((out / 'posts.txt').read_text())
-          print(json.dumps(report, indent=2))
+                  x = y = px = py = float('nan')
+                  inside = False
+              band = ds.GetRasterBand(1)
+              value = None
+              if inside:
+                  value = float(band.ReadAsArray(int(px), int(py), 1, 1)[0, 0])
+                  # Quicklook centered on the site, retaining source detail before downsampling.
+                  half = min(5000, int(px), int(py), ds.RasterXSize-int(px)-1, ds.RasterYSize-int(py)-1)
+                  half = max(256, half)
+                  xoff = max(0, int(px)-half)
+                  yoff = max(0, int(py)-half)
+                  xsize = min(ds.RasterXSize-xoff, 2*half)
+                  ysize = min(ds.RasterYSize-yoff, 2*half)
+                  opts = gdal.TranslateOptions(
+                      format='PNG', srcWin=[xoff,yoff,xsize,ysize], width=1200,
+                      outputType=gdal.GDT_Byte, scaleParams=[[]]
+                  )
+                  try:
+                      gdal.Translate(f'quicklooks/{path.stem}.png', ds, options=opts)
+                  except Exception:
+                      pass
+              rows.append({
+                  'file': path.name,
+                  'raster_size': [ds.RasterXSize, ds.RasterYSize],
+                  'geotransform': list(ds.GetGeoTransform()),
+                  'projection_wkt': ds.GetProjection(),
+                  'site_lon_east_deg': lon,
+                  'site_lat_deg': lat,
+                  'site_projected_xy': [x,y],
+                  'site_pixel_xy': [px,py],
+                  'inside': inside,
+                  'site_value_raw': value,
+                  'unit_type': band.GetUnitType(),
+                  'nodata': band.GetNoDataValue(),
+                  'metadata': ds.GetMetadata(),
+              })
+          Path('report/site_coverage.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
+          print(json.dumps(rows, indent=2))
           PY
 
-          cat > out/terrain_urls.txt <<'EOF'
-          https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/DATA/SDP/NAC_DTM/ESALL_SR12/NAC_DTM_ESALL_SR12.TIF
-          https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif
-          https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF
-          EOF
-          : > out/terrain_probe.txt
-          while IFS= read -r url; do
-            echo "=== ${url}" >> out/terrain_probe.txt
-            curl -L -A 'Mozilla/5.0' --connect-timeout 20 --max-time 120 -sS -I "$url" >> out/terrain_probe.txt 2>&1 || true
-          done < out/terrain_urls.txt
+          sha256sum terrain/*.TIF > report/terrain_sha256.txt
+          du -h terrain/* report/* quicklooks/* 2>/dev/null | sort -h > report/file_sizes.txt
 
-          find out -maxdepth 2 -type f -printf '%p\t%s bytes\n' | sort | tee out/listing.txt
-
-      - name: Upload discovery package
+      - name: Upload terrain inspection
         uses: actions/upload-artifact@v4
         with:
-          name: ce7-discovery-expanded
-          path: out
+          name: ce7-terrain-inspection
+          path: |
+            report
+            quicklooks
           if-no-files-found: error
           retention-days: 1
