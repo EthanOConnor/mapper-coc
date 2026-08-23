@@ -1,0 +1,157 @@
+    terrain_line = axes[1].plot(t, vis * 100.0, linewidth=0.8, label="Terrain-aware visible solar disk")[0]
+    axes[1].fill_between(t, 0.0, vis * 100.0, alpha=0.25, color=terrain_line.get_color())
+    axes[1].plot(t, flat * 100.0, linewidth=0.6, linestyle="--", label="Zero-degree horizon comparison")
+    axes[1].set_ylim(-2, 102)
+    axes[1].set_ylabel("Solar disk visible (%)")
+    axes[1].legend(loc="upper right")
+    axes[1].grid(True, linewidth=0.4, alpha=0.35)
+
+    axes[2].plot(t, rolling * 100.0, linewidth=1.1, label="29.53-day rolling mean visibility")
+    axes[2].set_ylim(0, 100)
+    axes[2].set_ylabel("Rolling mean (%)")
+    axes[2].grid(True, linewidth=0.4, alpha=0.35)
+    axes[2].legend(loc="upper right")
+    axes[2].set_xlabel("UTC")
+
+    locator = mdates.MonthLocator(interval=2)
+    axes[2].xaxis.set_major_locator(locator)
+    axes[2].xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    for year in (2027, 2028, 2029):
+        date = pd.Timestamp(f"{year}-01-01", tz="UTC")
+        for ax in axes:
+            ax.axvline(date, linewidth=0.5, alpha=0.45)
+
+    fig.suptitle("CE-7 publicly discussed landing site — terrain-aware solar illumination", fontsize=18)
+    fig.text(
+        0.5,
+        0.956,
+        f"88.80000°S, 123.50000°E  ·  ground elevation {site_elevation_m:.1f} m  ·  observer {OBSERVER_HEIGHT_M:.1f} m above surface  ·  10-minute samples",
+        ha="center",
+        va="top",
+        fontsize=10.5,
+    )
+    fig.text(
+        0.01,
+        0.006,
+        "Nested public terrain: 5 m LOLA local mosaic; 10 m adjusted LOLA regional DEM; 80 m adjusted LOLA far horizon. "
+        "Finite solar disk; spherical-Moon 3-D line of sight; independent analysis, not a mission product.",
+        ha="left",
+        va="bottom",
+        fontsize=8.5,
+    )
+    axes[1].text(
+        0.012,
+        0.93,
+        f"Longest darkness: {stats['longest_continuous_darkness_hours']/24:.1f} d\n"
+        f"Longest any-sun run: {stats['longest_continuous_any_sun_hours']/24:.1f} d\n"
+        f"Any-sun duty cycle: {100*stats['fraction_of_time_any_sun_visible']:.1f}%",
+        transform=axes[1].transAxes,
+        va="top",
+        fontsize=9,
+        bbox={"boxstyle": "round,pad=0.35", "facecolor": "white", "alpha": 0.82, "edgecolor": "0.75"},
+    )
+
+    png = out_dir / "ce7_terrain_illumination_2025-2029.png"
+    svg = out_dir / "ce7_terrain_illumination_2025-2029.svg"
+    fig.savefig(png, dpi=220)
+    fig.savefig(svg)
+    plt.close(fig)
+    return [png, svg]
+
+
+def plot_horizon(profile: HorizonProfile, out_dir: Path) -> Path:
+    fig, ax = plt.subplots(figsize=(14, 5.2), constrained_layout=True)
+    line = ax.plot(profile.azimuth_deg, profile.elevation_deg, linewidth=1.0, label="Terrain horizon at 1.5 m observer height")[0]
+    ax.fill_between(profile.azimuth_deg, np.nanmin(profile.elevation_deg) - 0.2, profile.elevation_deg, alpha=0.18, color=line.get_color())
+    ax.axhline(0.0, linestyle="--", linewidth=0.7, label="Local horizontal plane")
+    ax.set_xlim(0, 360)
+    ax.set_xticks(np.arange(0, 361, 45))
+    ax.set_xlabel("Azimuth clockwise from north (degrees)")
+    ax.set_ylabel("Horizon elevation (degrees)")
+    ax.set_title("CE-7 modeled site terrain horizon")
+    ax.grid(True, linewidth=0.4, alpha=0.35)
+    ax.legend(loc="upper right")
+    path = out_dir / "ce7_terrain_horizon_profile.png"
+    fig.savefig(path, dpi=220)
+    plt.close(fig)
+    return path
+
+
+def plot_local_terrain(mid_dem: Path, site_elevation_m: float, out_dir: Path) -> Path:
+    ds = gdal.Open(str(mid_dem), gdal.GA_ReadOnly)
+    ensure_north_up(ds)
+    band = ds.GetRasterBand(1)
+    max_size = 1600
+    scale = max(ds.RasterXSize / max_size, ds.RasterYSize / max_size, 1.0)
+    width = max(1, int(round(ds.RasterXSize / scale)))
+    height = max(1, int(round(ds.RasterYSize / scale)))
+    arr = band.ReadAsArray(0, 0, ds.RasterXSize, ds.RasterYSize, buf_xsize=width, buf_ysize=height).astype(float)
+    gt = ds.GetGeoTransform()
+    x0, y0 = polar_xy_from_lon_lat(SITE_LON_EAST_DEG, SITE_LAT_DEG)
+    xmin = (gt[0] - x0) / 1000.0
+    xmax = (gt[0] + ds.RasterXSize * gt[1] - x0) / 1000.0
+    ymax = (gt[3] - y0) / 1000.0
+    ymin = (gt[3] + ds.RasterYSize * gt[5] - y0) / 1000.0
+    dx = abs((xmax - xmin) / width)
+    dy = abs((ymax - ymin) / height)
+    ls = LightSource(azdeg=315, altdeg=35)
+    shaded = ls.shade(arr, cmap=plt.get_cmap("terrain"), vert_exag=1.0, dx=dx * 1000.0, dy=dy * 1000.0, blend_mode="overlay")
+
+    fig, ax = plt.subplots(figsize=(10, 9), constrained_layout=True)
+    ax.imshow(shaded, extent=(xmin, xmax, ymin, ymax), origin="upper")
+    contours = ax.contour(
+        np.linspace(xmin, xmax, width),
+        np.linspace(ymax, ymin, height),
+        arr,
+        levels=12,
+        linewidths=0.35,
+        alpha=0.55,
+    )
+    ax.clabel(contours, inline=True, fontsize=6, fmt="%.0f m")
+    ax.scatter([0], [0], marker="*", s=120, label=f"Modeled site ({site_elevation_m:.1f} m)")
+    for radius in (5, 10, 20):
+        ax.add_patch(plt.Circle((0, 0), radius, fill=False, linewidth=0.6, linestyle="--", alpha=0.65))
+        ax.text(radius / math.sqrt(2), radius / math.sqrt(2), f"{radius} km", fontsize=7)
+    ax.set_aspect("equal")
+    ax.set_xlabel("East-like polar stereographic X offset (km)")
+    ax.set_ylabel("North-like polar stereographic Y offset (km)")
+    ax.set_title("Local 5 m LOLA terrain, maximum-pooled to 10 m for display and horizon analysis")
+    ax.legend(loc="upper right")
+    path = out_dir / "ce7_local_terrain.png"
+    fig.savefig(path, dpi=220)
+    plt.close(fig)
+    return path
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_readme(out_dir: Path, site_elevation_m: float, stats: dict[str, Any], metadata: dict[str, Any]) -> Path:
+    text = f"""# CE-7 terrain-aware illumination analysis
+
+## Scope
+
+This is an **independent reproduction**, not an official CNSA mission product. It models the publicly discussed/preselected CE-7 point shown in the source author's terrain-aware follow-up:
+
+- Latitude: **{SITE_LAT_DEG:.5f}°**
+- Longitude: **{SITE_LON_EAST_DEG:.5f}°E**
+- DEM ground elevation used: **{site_elevation_m:.2f} m**
+- Observer height: **{OBSERVER_HEIGHT_M:.1f} m above the DEM surface**
+- Analysis period: **{START_UTC} through {END_UTC}** (end exclusive)
+- Time step: **{TIME_STEP_MIN} minutes**
+
+Source discussion:
+
+- https://x.com/SegerYU/status/2091250852568932449 — original zero-terrain chart
+- https://x.com/SegerYU/status/2091269371452878981 — follow-up identifying 88.8°S, 123.5°E and a 1.5 m observer
+
+## Terrain actually used
+
+The horizon is nested so the highest practical public resolution is used where it matters most:
+
+1. **0.01–2.5 km:** native 5 m/pixel LOLA south-pole mosaic.

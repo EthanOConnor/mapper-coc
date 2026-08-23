@@ -1,0 +1,161 @@
+            y_centers = gt[3] + (np.arange(yoff, yoff + rows, dtype=np.float64) + 0.5) * gt[5]
+            dy = y_centers[:, None] - y0
+            d2 = dx_all[None, :] ** 2 + dy ** 2
+            valid = (d2 >= min2) & (d2 <= max2) & np.isfinite(z_grid)
+            if nodata is not None and np.isfinite(nodata):
+                valid &= z_grid != nodata
+            if not np.any(valid):
+                continue
+
+            row_idx, col_idx = np.nonzero(valid)
+            xx = x_centers[col_idx]
+            yy = y_centers[row_idx]
+            zz = z_grid[row_idx, col_idx]
+            planar_distance = np.sqrt(d2[row_idx, col_idx])
+
+            lon, lat = lon_lat_from_polar_xy(xx, yy)
+            ux, uy, uz = unit_vector(lon, lat)
+            radius = R_MOON_M + zz
+            tx = radius * ux
+            ty = radius * uy
+            tz = radius * uz
+            vx = tx - observer[0]
+            vy = ty - observer[1]
+            vz = tz - observer[2]
+            local_up = vx * up[0] + vy * up[1] + vz * up[2]
+            local_east = vx * east[0] + vy * east[1] + vz * east[2]
+            local_north = vx * north[0] + vy * north[1] + vz * north[2]
+            horizontal = np.hypot(local_east, local_north)
+            altitude = np.degrees(np.arctan2(local_up, horizontal))
+            azimuth = np.degrees(np.arctan2(local_east, local_north)) % 360.0
+            bins = np.floor(azimuth / AZ_BIN_DEG).astype(np.int64) % n_bins
+
+            update_horizon_groups(
+                horizon,
+                control_distance,
+                control_z,
+                control_source,
+                bins,
+                altitude,
+                planar_distance,
+                zz,
+                level.label,
+            )
+
+    raw = horizon.copy()
+    finite = np.isfinite(horizon)
+    if finite.sum() < n_bins * 0.95:
+        raise RuntimeError(f"Only {finite.sum()}/{n_bins} horizon bins populated")
+    if not finite.all():
+        idx = np.arange(n_bins)
+        finite_idx = idx[finite]
+        finite_val = horizon[finite]
+        x_ext = np.r_[finite_idx[-1] - n_bins, finite_idx, finite_idx[0] + n_bins]
+        y_ext = np.r_[finite_val[-1], finite_val, finite_val[0]]
+        horizon[~finite] = np.interp(idx[~finite], x_ext, y_ext)
+        # Metadata for rare filled bins comes from the nearest populated neighbor.
+        for i in idx[~finite]:
+            circular = np.minimum((finite_idx - i) % n_bins, (i - finite_idx) % n_bins)
+            j = finite_idx[int(np.argmin(circular))]
+            control_distance[i] = control_distance[j]
+            control_z[i] = control_z[j]
+            control_source[i] = control_source[j]
+
+    # Conservative 0.3-degree footprint envelope: use the largest of the center
+    # bin and its immediate neighbors. This also closes sub-bin holes in the far grid.
+    neighbor_h = np.vstack((np.roll(horizon, 1), horizon, np.roll(horizon, -1)))
+    choice = np.argmax(neighbor_h, axis=0)
+    smoothed = np.max(neighbor_h, axis=0)
+    neighbor_d = np.vstack((np.roll(control_distance, 1), control_distance, np.roll(control_distance, -1)))
+    neighbor_z = np.vstack((np.roll(control_z, 1), control_z, np.roll(control_z, -1)))
+    neighbor_s = np.vstack((np.roll(control_source, 1), control_source, np.roll(control_source, -1)))
+    col = np.arange(n_bins)
+    control_distance = neighbor_d[choice, col]
+    control_z = neighbor_z[choice, col]
+    control_source = neighbor_s[choice, col]
+
+    centers = (np.arange(n_bins, dtype=float) + 0.5) * AZ_BIN_DEG
+    return HorizonProfile(centers, raw, smoothed, control_distance, control_z, control_source)
+
+
+def circular_interp(azimuth_deg: np.ndarray, profile_az: np.ndarray, profile_value: np.ndarray) -> np.ndarray:
+    x = np.r_[profile_az[-1] - 360.0, profile_az, profile_az[0] + 360.0]
+    y = np.r_[profile_value[-1], profile_value, profile_value[0]]
+    return np.interp(np.mod(azimuth_deg, 360.0), x, y)
+
+
+def visible_disk_fraction(clearance_deg: np.ndarray, radius_deg: np.ndarray) -> np.ndarray:
+    ratio = clearance_deg / radius_deg
+    result = np.empty_like(ratio, dtype=float)
+    result[ratio <= -1.0] = 0.0
+    result[ratio >= 1.0] = 1.0
+    mid = (ratio > -1.0) & (ratio < 1.0)
+    x = ratio[mid]
+    result[mid] = (np.arccos(-x) + x * np.sqrt(np.maximum(0.0, 1.0 - x * x))) / math.pi
+    return np.clip(result, 0.0, 1.0)
+
+
+def load_kernels(kernel_dir: Path) -> list[Path]:
+    names = [
+        "naif0012.tls",
+        "de421.bsp",
+        "pck00010.tpc",
+        "moon_pa_de421_1900-2050.bpc",
+        "moon_080317.tf",
+    ]
+    paths = [kernel_dir / name for name in names]
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing SPICE kernels: {missing}")
+    spice.kclear()
+    for path in paths:
+        spice.furnsh(str(path))
+    return paths
+
+
+def spice_positions(target: str, ets: np.ndarray, frame: str, observer: str) -> np.ndarray:
+    """Vectorized SPICE position with a robust scalar fallback."""
+    try:
+        pos, _ = spice.spkpos(target, ets, frame, "LT+S", observer)
+        arr = np.asarray(pos, dtype=float)
+        if arr.shape == (3, ets.size):
+            arr = arr.T
+        if arr.shape != (ets.size, 3):
+            raise ValueError(f"Unexpected vectorized SPICE result shape {arr.shape}")
+        return arr
+    except Exception as exc:
+        print(f"Vectorized SPICE call failed ({exc!r}); using scalar loop", flush=True)
+        arr = np.empty((ets.size, 3), dtype=float)
+        for i, et in enumerate(ets):
+            arr[i], _ = spice.spkpos(target, float(et), frame, "LT+S", observer)
+            if i and i % 10_000 == 0:
+                print(f"SPICE positions: {i}/{ets.size}", flush=True)
+        return arr
+
+
+def calculate_illumination(
+    horizon: HorizonProfile,
+    site_surface_elevation_m: float,
+    observer_height_m: float,
+    kernel_dir: Path,
+) -> pd.DataFrame:
+    kernel_paths = load_kernels(kernel_dir)
+    start = pd.Timestamp(START_UTC)
+    end = pd.Timestamp(END_UTC)
+    timestamps = pd.date_range(start, end, freq=f"{TIME_STEP_MIN}min", inclusive="left")
+    et0 = float(spice.str2et(start.strftime("%Y-%m-%dT%H:%M:%S UTC")))
+    ets = et0 + np.arange(timestamps.size, dtype=float) * TIME_STEP_MIN * 60.0
+
+    frame = "MOON_ME"
+    sun_center_km = spice_positions("SUN", ets, frame, "MOON")
+    up, east, north = local_basis(SITE_LON_EAST_DEG, SITE_LAT_DEG)
+    observer_km = (R_MOON_M + site_surface_elevation_m + observer_height_m) * up / 1000.0
+    sight = sun_center_km - observer_km[None, :]
+    east_component = sight @ east
+    north_component = sight @ north
+    up_component = sight @ up
+    horizontal = np.hypot(east_component, north_component)
+    sun_altitude = np.degrees(np.arctan2(up_component, horizontal))
+    sun_azimuth = np.degrees(np.arctan2(east_component, north_component)) % 360.0
+    terrain_horizon = circular_interp(sun_azimuth, horizon.azimuth_deg, horizon.elevation_deg)
+

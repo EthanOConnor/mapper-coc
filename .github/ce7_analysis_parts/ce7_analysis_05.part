@@ -1,0 +1,90 @@
+    transitions.to_csv(transitions_path, index=False, float_format="%.6f", date_format="%Y-%m-%dT%H:%M:%SZ")
+    monthly_path = args.out / "ce7_monthly_summary.csv"
+    monthly.to_csv(monthly_path, index=False, float_format="%.8f", date_format="%Y-%m-%dT%H:%M:%SZ")
+
+    chart_paths = plot_main(df, stats, site_elevation_m, args.out)
+    horizon_plot = plot_horizon(horizon, args.out)
+    terrain_plot = plot_local_terrain(args.mid10, site_elevation_m, args.out)
+
+    terrain_inputs = [args.near5, args.mid10, args.region40, args.far240]
+    kernel_inputs = sorted(args.kernels.iterdir())
+    metadata: dict[str, Any] = {
+        "analysis_name": "CE-7 terrain-aware illumination",
+        "independent_not_mission_official": True,
+        "source_site_posts": [
+            "https://x.com/SegerYU/status/2091250852568932449",
+            "https://x.com/SegerYU/status/2091269371452878981",
+        ],
+        "site": {
+            "latitude_deg": SITE_LAT_DEG,
+            "longitude_east_deg": SITE_LON_EAST_DEG,
+            "surface_elevation_m": site_elevation_m,
+            "observer_height_m": OBSERVER_HEIGHT_M,
+            "polar_stereographic_xy_m": [x0, y0],
+        },
+        "time": {"start_utc": START_UTC, "end_utc_exclusive": END_UTC, "step_minutes": TIME_STEP_MIN},
+        "horizon": {
+            "azimuth_bin_deg": AZ_BIN_DEG,
+            "conservative_envelope_deg": 0.3,
+            "moon_reference_radius_m": R_MOON_M,
+            "levels": [level.__dict__ | {"path": str(level.path)} for level in levels],
+        },
+        "spice": {
+            "frame": df.attrs.get("frame"),
+            "aberration_correction": "LT+S",
+            "kernels": [str(p) for p in kernel_inputs],
+        },
+        "terrain_source_urls": {
+            "5m": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif",
+            "10m": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_83S_10MPP_ADJ.TIF",
+            "80m": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF",
+        },
+        "nac_stereo_dtm_coverage": {
+            "contains_site": False,
+            "nearest_dtm": "ESALL_SR12",
+            "nearest_footprint_distance_km": 32.80133175427914,
+            "footprint_index": "https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/EXTRAS/SHAPEFILE/NAC_DTMS/NAC_DTMS_360.ZIP",
+        },
+        "summary": stats,
+        "software": {
+            "python": sys.version,
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "matplotlib": matplotlib.__version__,
+            "gdal": gdal.VersionInfo(),
+            "spiceypy": spice.__version__,
+        },
+    }
+    metadata_path = args.out / "analysis_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    readme_path = write_readme(args.out, site_elevation_m, stats, metadata)
+
+    output_files = [p for p in args.out.iterdir() if p.is_file() and p.name != "SHA256SUMS.txt"]
+    checksum_path = args.out / "SHA256SUMS.txt"
+    checksum_path.write_text("".join(f"{sha256(p)}  {p.name}\n" for p in sorted(output_files)), encoding="utf-8")
+
+    # Basic invariants make a silent bad analysis fail the workflow.
+    if df.shape[0] < 100_000:
+        raise RuntimeError(f"Unexpectedly short time series: {df.shape[0]}")
+    numeric_cols = [
+        "sun_center_altitude_deg",
+        "sun_center_azimuth_deg",
+        "terrain_horizon_deg",
+        "visible_solar_disk_fraction",
+    ]
+    if not np.isfinite(df[numeric_cols].to_numpy()).all():
+        raise RuntimeError("Non-finite values in illumination time series")
+    if not ((df["visible_solar_disk_fraction"] >= 0) & (df["visible_solar_disk_fraction"] <= 1)).all():
+        raise RuntimeError("Visible fractions outside [0,1]")
+    if abs(site_elevation_m - 1638.4) > 30.0:
+        raise RuntimeError(f"Site elevation {site_elevation_m:.2f} m differs suspiciously from source follow-up")
+
+    print(json.dumps(stats, indent=2), flush=True)
+    print("Outputs:", flush=True)
+    for path in sorted(args.out.iterdir()):
+        print(f"  {path.name}: {path.stat().st_size} bytes", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

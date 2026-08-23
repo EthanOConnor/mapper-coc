@@ -1,0 +1,110 @@
+2. **2–25 km:** the same 5 m mosaic maximum-pooled to 10 m cells, preserving local ridge tops rather than averaging them down.
+3. **20–150 km:** adjusted 10 m/pixel LOLA regional DEM maximum-pooled to 40 m.
+4. **120–400 km:** adjusted 80 m/pixel LOLA DEM maximum-pooled to 240 m. Terrain beyond the 80°S model edge is below the geometric horizon at this site because of lunar curvature.
+
+Public data:
+
+- 5 m 87–90°S mosaic: https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/87S/ldem_87s_5mpp.tif
+- 10 m 83–90°S DEM: https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_83S_10MPP_ADJ.TIF
+- 80 m 80–90°S DEM: https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_80MPP_ADJ.TIF
+- Data descriptions: https://pgda.gsfc.nasa.gov/products/81 and https://pgda.gsfc.nasa.gov/products/90
+- Data DOI for the newer adjusted products: https://doi.org/10.60903/gsfcpgda-lola-spole
+
+The global LROC NAC stereo-DTM footprint index was also queried at the modeled point. No released NAC stereo DTM contains it; the nearest footprint was ESALL_SR12, about 32.8 km away. Therefore a nearby 2 m NAC DTM was **not** misapplied to the CE-7 point.
+
+## Geometry and illumination method
+
+- Terrain pixels are converted to three-dimensional Moon-fixed positions on a sphere of radius {R_MOON_M:.0f} m plus DEM height.
+- The observer is placed at the DEM height plus {OBSERVER_HEIGHT_M:.1f} m.
+- For each 0.1° azimuth bin, the largest line-of-sight elevation angle among all nested terrain cells is retained.
+- A conservative 0.3° azimuth footprint envelope is applied to close gaps from distant, coarser cells.
+- Sun vectors are computed with NASA/JPL SPICE in the DE421 lunar mean-Earth frame (`MOON_ME`) using DE421 lunar orientation and planetary ephemeris kernels.
+- The Sun is a finite disk. Visible fraction is the analytic area of a circular disk above the locally straight terrain-horizon line, using the apparent solar angular radius at each sample.
+- Light-time and stellar-aberration corrections use SPICE `LT+S`.
+
+## Headline results for this period
+
+- Any part of Sun visible: **{100*stats['fraction_of_time_any_sun_visible']:.2f}%** of samples
+- Full solar disk visible: **{100*stats['fraction_of_time_full_solar_disk_visible']:.2f}%** of samples
+- Longest continuous darkness: **{stats['longest_continuous_darkness_hours']/24:.2f} days**
+- Longest continuous interval with any Sun: **{stats['longest_continuous_any_sun_hours']/24:.2f} days**
+- Mean visible solar-disk fraction: **{100*stats['mean_visible_solar_disk_fraction']:.2f}%**
+
+## Important limitations
+
+- “5 m/pixel” is the output grid spacing, not five-meter independent terrain knowledge. High-resolution LOLA polar products contain substantial interpolation between laser tracks; the associated literature reports typical 30–55 cm residuals for the 87–90°S mosaic, but local unresolved relief can still move grazing-light transitions.
+- The 5 m and 10 m products are blended at distance-dependent boundaries. Maximum pooling is intentionally conservative for ridge horizons, but can overstate a narrow peak by a small angular amount.
+- This is a single point, not a landing-ellipse ensemble. A shift of hundreds of meters can change which nearby ridge controls a grazing transition.
+- Boulders, lander structure, solar-panel attitude, plume alteration, and self-shadowing are not modeled.
+- The finite-disk calculation treats the terrain horizon as locally straight across the ~0.53° solar diameter. Strong horizon variation within that width is smoothed by the 0.3° envelope.
+- Mission landing-site status can change; the coordinate is the public source point, not a claim of a confirmed final touchdown coordinate.
+
+## Files
+
+- `ce7_terrain_illumination_2025-2029.png` / `.svg` — main chart
+- `ce7_terrain_horizon_profile.png` — azimuthal horizon
+- `ce7_local_terrain.png` — local terrain context
+- `ce7_illumination_10min.csv.gz` — complete time series
+- `ce7_illumination_transitions.csv` — dark/partial/full runs
+- `ce7_monthly_summary.csv` — monthly statistics
+- `ce7_terrain_horizon.csv` — horizon profile and controlling terrain tier
+- `analysis_metadata.json` — inputs and calculation settings
+- `SHA256SUMS.txt` — checksums
+
+## Reproducibility
+
+The exact source URLs, processing tiers, SPICE kernels, output hashes, software versions, and summary statistics are recorded in `analysis_metadata.json`.
+"""
+    path = out_dir / "README.md"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--near5", type=Path, required=True)
+    parser.add_argument("--mid10", type=Path, required=True)
+    parser.add_argument("--region40", type=Path, required=True)
+    parser.add_argument("--far240", type=Path, required=True)
+    parser.add_argument("--kernels", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+
+    gdal.UseExceptions()
+    args.out.mkdir(parents=True, exist_ok=True)
+    x0, y0 = polar_xy_from_lon_lat(SITE_LON_EAST_DEG, SITE_LAT_DEG)
+    near_ds = gdal.Open(str(args.near5), gdal.GA_ReadOnly)
+    if near_ds is None:
+        raise FileNotFoundError(args.near5)
+    site_elevation_m = bilinear_sample(near_ds, x0, y0)
+    print(f"Site projected XY: {x0:.3f}, {y0:.3f} m", flush=True)
+    print(f"Site elevation from 5 m DEM: {site_elevation_m:.3f} m", flush=True)
+
+    levels = [
+        TerrainLevel(args.near5, 5.0, 2_500.0, "5 m LOLA native", 5.0),
+        TerrainLevel(args.mid10, 2_000.0, 25_000.0, "5 m LOLA max-pooled to 10 m", 10.0),
+        TerrainLevel(args.region40, 20_000.0, 150_000.0, "10 m LOLA max-pooled to 40 m", 40.0),
+        TerrainLevel(args.far240, 120_000.0, 400_000.0, "80 m LOLA max-pooled to 240 m", 240.0),
+    ]
+    horizon = build_horizon(levels, site_elevation_m, OBSERVER_HEIGHT_M)
+    horizon_csv = save_horizon_csv(horizon, args.out)
+
+    df = calculate_illumination(horizon, site_elevation_m, OBSERVER_HEIGHT_M, args.kernels)
+    states = classify_visibility(df["visible_solar_disk_fraction"].to_numpy())
+    transitions = run_table(df["timestamp_utc"], states, TIME_STEP_MIN)
+    monthly, stats = summaries(df, transitions)
+    stats.update(
+        {
+            "site_latitude_deg": SITE_LAT_DEG,
+            "site_longitude_east_deg": SITE_LON_EAST_DEG,
+            "site_surface_elevation_m": site_elevation_m,
+            "observer_height_m": OBSERVER_HEIGHT_M,
+            "horizon_minimum_deg": float(np.nanmin(horizon.elevation_deg)),
+            "horizon_median_deg": float(np.nanmedian(horizon.elevation_deg)),
+            "horizon_maximum_deg": float(np.nanmax(horizon.elevation_deg)),
+        }
+    )
+
+    timeseries_path = args.out / "ce7_illumination_10min.csv.gz"
+    df.to_csv(timeseries_path, index=False, compression="gzip", float_format="%.9f", date_format="%Y-%m-%dT%H:%M:%SZ")
+    transitions_path = args.out / "ce7_illumination_transitions.csv"
