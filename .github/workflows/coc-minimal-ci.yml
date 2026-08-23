@@ -1,4 +1,4 @@
-name: CE7 Five-Metre Terrain Inspection
+name: CE7 NAC DTM Footprint Query
 
 on:
   push:
@@ -11,64 +11,83 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
+  query:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - name: Install GDAL tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal python3-numpy
-      - name: Inspect Site04 5 m terrain tile
+          sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal python3-numpy unzip
+      - name: Query LROC global NAC DTM footprint shapefile
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p terrain report quicklooks
+          mkdir -p data out
           curl -L --retry 3 --retry-delay 2 \
-            'https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site04/Site04_final_adj_5mpp_surf.tif' \
-            -o terrain/Site04_final_adj_5mpp_surf.tif
-          gdalinfo -json -stats terrain/Site04_final_adj_5mpp_surf.tif > report/Site04.gdalinfo.json
-          gdalinfo terrain/Site04_final_adj_5mpp_surf.tif > report/Site04.gdalinfo.txt
+            'https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/EXTRAS/SHAPEFILE/NAC_DTMS/NAC_DTMS_360.ZIP' \
+            -o data/NAC_DTMS_360.ZIP
+          unzip -q data/NAC_DTMS_360.ZIP -d data/nac_dtms
+          find data/nac_dtms -maxdepth 3 -type f -printf '%p\n' > out/files.txt
           /usr/bin/python3 - <<'PY'
-          import json
+          import json, math
           from pathlib import Path
-          from osgeo import gdal, osr
-          gdal.UseExceptions()
-          path='terrain/Site04_final_adj_5mpp_surf.tif'
-          ds=gdal.Open(path)
-          lat,lon=-88.8,123.5
-          dst=osr.SpatialReference(); dst.ImportFromWkt(ds.GetProjection()); dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-          src=osr.SpatialReference(); src.ImportFromProj4('+proj=longlat +R=1737400 +no_defs'); src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-          ct=osr.CoordinateTransformation(src,dst)
-          x,y,_=ct.TransformPoint(lon,lat)
-          inv=gdal.InvGeoTransform(ds.GetGeoTransform())
-          px,py=gdal.ApplyGeoTransform(inv,x,y)
-          inside=0<=px<ds.RasterXSize and 0<=py<ds.RasterYSize
-          band=ds.GetRasterBand(1)
-          value=float(band.ReadAsArray(int(px),int(py),1,1)[0,0]) if inside else None
-          report={
-            'file':Path(path).name,'raster_size':[ds.RasterXSize,ds.RasterYSize],
-            'geotransform':list(ds.GetGeoTransform()),'projection_wkt':ds.GetProjection(),
-            'site_lon_east_deg':lon,'site_lat_deg':lat,'site_projected_xy':[x,y],
-            'site_pixel_xy':[px,py],'inside':inside,'site_value_raw':value,
-            'nodata':band.GetNoDataValue(),'metadata':ds.GetMetadata(),
+          from osgeo import ogr, osr
+
+          shp = next(Path('data/nac_dtms').rglob('*.shp'))
+          ds = ogr.Open(str(shp))
+          layer = ds.GetLayer(0)
+          defn = layer.GetLayerDefn()
+          fields = [defn.GetFieldDefn(i).GetName() for i in range(defn.GetFieldCount())]
+
+          lon, lat = 123.5, -88.8
+          point_geo = ogr.Geometry(ogr.wkbPoint)
+          point_geo.AddPoint(lon, lat)
+
+          src = layer.GetSpatialRef().Clone()
+          src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+          dst = osr.SpatialReference()
+          dst.ImportFromProj4('+proj=stere +lat_0=-90 +lon_0=0 +k=1 +R=1737400 +units=m +no_defs')
+          dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+          transform = osr.CoordinateTransformation(src, dst)
+          point_xy = point_geo.Clone(); point_xy.Transform(transform)
+
+          containing = []
+          nearby = []
+          layer.ResetReading()
+          for feat in layer:
+              geom = feat.GetGeometryRef()
+              if geom is None:
+                  continue
+              attrs = {f: feat.GetField(f) for f in fields}
+              contains = bool(geom.Contains(point_geo) or geom.Intersects(point_geo))
+              gxy = geom.Clone(); gxy.Transform(transform)
+              distance_m = float(gxy.Distance(point_xy))
+              row = {'contains_site': contains, 'distance_to_footprint_m': distance_m, **attrs}
+              if contains:
+                  containing.append(row)
+              if distance_m <= 50000:
+                  nearby.append(row)
+
+          nearby.sort(key=lambda r: r['distance_to_footprint_m'])
+          result = {
+              'site': {'latitude_deg': lat, 'longitude_east_deg': lon},
+              'shapefile': str(shp), 'fields': fields,
+              'containing_count': len(containing),
+              'containing': containing,
+              'nearest_30': nearby[:30],
           }
-          Path('report/site04_coverage.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
-          print(json.dumps(report,indent=2))
-          if inside:
-            half=min(6000,int(px),int(py),ds.RasterXSize-int(px)-1,ds.RasterYSize-int(py)-1)
-            xoff=max(0,int(px)-half); yoff=max(0,int(py)-half)
-            xsize=min(ds.RasterXSize-xoff,2*half); ysize=min(ds.RasterYSize-yoff,2*half)
-            gdal.Translate('quicklooks/Site04_site.png',ds,options=gdal.TranslateOptions(
-              format='PNG',srcWin=[xoff,yoff,xsize,ysize],width=1600,outputType=gdal.GDT_Byte,scaleParams=[[]]))
+          Path('out/nac_dtm_query.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+          Path('out/nac_dtm_query.txt').write_text(
+              'CONTAINING\n' + '\n'.join(str(x) for x in containing) +
+              '\n\nNEAREST\n' + '\n'.join(str(x) for x in nearby[:30]), encoding='utf-8')
+          print(json.dumps(result, ensure_ascii=False, indent=2))
           PY
-          sha256sum terrain/Site04_final_adj_5mpp_surf.tif > report/terrain_sha256.txt
+          sha256sum data/NAC_DTMS_360.ZIP > out/shapefile_sha256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: ce7-site04-inspection
-          path: |
-            report
-            quicklooks
+          name: ce7-nac-dtm-query
+          path: out
           if-no-files-found: error
           retention-days: 1
