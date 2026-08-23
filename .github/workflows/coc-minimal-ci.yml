@@ -29,59 +29,79 @@ jobs:
             'https://pds.mcp.nasa.gov/data/store/img/lunar_reconnaissance_orbiter/pds4/lroc/lro-l-lroc-5-rdr/LROLRC_2001/EXTRAS/SHAPEFILE/NAC_DTMS/NAC_DTMS_360.ZIP' \
             -o data/NAC_DTMS_360.ZIP
           unzip -q data/NAC_DTMS_360.ZIP -d data/nac_dtms
-          find data/nac_dtms -maxdepth 3 -type f -printf '%p\n' > out/files.txt
+          find data/nac_dtms -maxdepth 5 -type f -printf '%p\n' | sort > out/files.txt
           /usr/bin/python3 - <<'PY'
-          import json, math
+          import json
           from pathlib import Path
           from osgeo import ogr, osr
 
-          shp = next(Path('data/nac_dtms').rglob('*.shp'))
+          files = [p for p in Path('data/nac_dtms').rglob('*') if p.is_file()]
+          shps = [p for p in files if p.suffix.lower() == '.shp']
+          if not shps:
+              raise RuntimeError(f'No shapefile found; files={files!r}')
+          shp = shps[0]
           ds = ogr.Open(str(shp))
+          if ds is None:
+              raise RuntimeError(f'OGR could not open {shp}')
           layer = ds.GetLayer(0)
           defn = layer.GetLayerDefn()
           fields = [defn.GetFieldDefn(i).GetName() for i in range(defn.GetFieldCount())]
 
           lon, lat = 123.5, -88.8
+          layer_srs = layer.GetSpatialRef()
+          if layer_srs is None:
+              raise RuntimeError('Footprint shapefile has no SRS')
+          layer_srs = layer_srs.Clone()
+          layer_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+          geo_srs = osr.SpatialReference()
+          geo_srs.ImportFromProj4('+proj=longlat +R=1737400 +no_defs')
+          geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
           point_geo = ogr.Geometry(ogr.wkbPoint)
           point_geo.AddPoint(lon, lat)
+          if not layer_srs.IsSameGeogCS(geo_srs) or not layer_srs.IsGeographic():
+              to_layer = osr.CoordinateTransformation(geo_srs, layer_srs)
+              point_layer = point_geo.Clone(); point_layer.Transform(to_layer)
+          else:
+              point_layer = point_geo.Clone()
 
-          src = layer.GetSpatialRef().Clone()
-          src.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-          dst = osr.SpatialReference()
-          dst.ImportFromProj4('+proj=stere +lat_0=-90 +lon_0=0 +k=1 +R=1737400 +units=m +no_defs')
-          dst.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-          transform = osr.CoordinateTransformation(src, dst)
-          point_xy = point_geo.Clone(); point_xy.Transform(transform)
+          polar_srs = osr.SpatialReference()
+          polar_srs.ImportFromProj4('+proj=stere +lat_0=-90 +lon_0=0 +k=1 +R=1737400 +units=m +no_defs')
+          polar_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+          layer_to_polar = osr.CoordinateTransformation(layer_srs, polar_srs)
+          point_xy = point_layer.Clone(); point_xy.Transform(layer_to_polar)
 
           containing = []
-          nearby = []
+          all_rows = []
           layer.ResetReading()
           for feat in layer:
               geom = feat.GetGeometryRef()
               if geom is None:
                   continue
               attrs = {f: feat.GetField(f) for f in fields}
-              contains = bool(geom.Contains(point_geo) or geom.Intersects(point_geo))
-              gxy = geom.Clone(); gxy.Transform(transform)
+              contains = bool(geom.Contains(point_layer) or geom.Intersects(point_layer))
+              gxy = geom.Clone(); gxy.Transform(layer_to_polar)
               distance_m = float(gxy.Distance(point_xy))
               row = {'contains_site': contains, 'distance_to_footprint_m': distance_m, **attrs}
+              all_rows.append(row)
               if contains:
                   containing.append(row)
-              if distance_m <= 50000:
-                  nearby.append(row)
 
-          nearby.sort(key=lambda r: r['distance_to_footprint_m'])
+          all_rows.sort(key=lambda r: r['distance_to_footprint_m'])
           result = {
               'site': {'latitude_deg': lat, 'longitude_east_deg': lon},
-              'shapefile': str(shp), 'fields': fields,
+              'shapefile': str(shp),
+              'layer_srs_wkt': layer_srs.ExportToWkt(),
+              'feature_count': layer.GetFeatureCount(),
+              'fields': fields,
               'containing_count': len(containing),
               'containing': containing,
-              'nearest_30': nearby[:30],
+              'nearest_30': all_rows[:30],
           }
           Path('out/nac_dtm_query.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
           Path('out/nac_dtm_query.txt').write_text(
               'CONTAINING\n' + '\n'.join(str(x) for x in containing) +
-              '\n\nNEAREST\n' + '\n'.join(str(x) for x in nearby[:30]), encoding='utf-8')
+              '\n\nNEAREST\n' + '\n'.join(str(x) for x in all_rows[:30]), encoding='utf-8')
           print(json.dumps(result, ensure_ascii=False, indent=2))
           PY
           sha256sum data/NAC_DTMS_360.ZIP > out/shapefile_sha256.txt
