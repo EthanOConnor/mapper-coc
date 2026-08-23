@@ -1,0 +1,141 @@
+    radii = np.asarray(spice.bodvrd("SUN", "RADII", 3)[1], dtype=float)
+    solar_radius_km = float(np.mean(radii))
+    sun_distance_km = np.linalg.norm(sight, axis=1)
+    solar_angular_radius = np.degrees(np.arcsin(solar_radius_km / sun_distance_km))
+    clearance = sun_altitude - terrain_horizon
+    visible_fraction = visible_disk_fraction(clearance, solar_angular_radius)
+    flat_clearance = sun_altitude
+    flat_visible_fraction = visible_disk_fraction(flat_clearance, solar_angular_radius)
+
+    df = pd.DataFrame(
+        {
+            "timestamp_utc": timestamps,
+            "sun_center_altitude_deg": sun_altitude,
+            "sun_center_azimuth_deg": sun_azimuth,
+            "terrain_horizon_deg": terrain_horizon,
+            "sun_center_clearance_deg": clearance,
+            "solar_angular_radius_deg": solar_angular_radius,
+            "visible_solar_disk_fraction": visible_fraction,
+            "zero_horizon_visible_fraction": flat_visible_fraction,
+            "sun_distance_km": sun_distance_km,
+        }
+    )
+    df.attrs["frame"] = frame
+    df.attrs["kernels"] = [str(p) for p in kernel_paths]
+    return df
+
+
+def classify_visibility(values: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:
+    state = np.full(values.shape, "partial", dtype=object)
+    state[values <= epsilon] = "dark"
+    state[values >= 1.0 - epsilon] = "full"
+    return state
+
+
+def run_table(timestamps: pd.DatetimeIndex | pd.Series, state: np.ndarray, step_minutes: int) -> pd.DataFrame:
+    ts = pd.DatetimeIndex(timestamps)
+    changes = np.r_[True, state[1:] != state[:-1]]
+    starts = np.flatnonzero(changes)
+    ends = np.r_[starts[1:], state.size]
+    rows: list[dict[str, Any]] = []
+    for start_i, end_i in zip(starts, ends, strict=True):
+        end_time = ts[end_i - 1] + pd.Timedelta(minutes=step_minutes)
+        rows.append(
+            {
+                "state": state[start_i],
+                "start_utc": ts[start_i],
+                "end_utc_exclusive": end_time,
+                "duration_hours": (end_i - start_i) * step_minutes / 60.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def consecutive_max(mask: np.ndarray) -> int:
+    if mask.size == 0 or not np.any(mask):
+        return 0
+    padded = np.r_[False, mask, False]
+    edges = np.flatnonzero(padded[1:] != padded[:-1])
+    return int(np.max(edges[1::2] - edges[::2]))
+
+
+def summaries(df: pd.DataFrame, transitions: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    indexed = df.set_index("timestamp_utc")
+    step_hours = TIME_STEP_MIN / 60.0
+    monthly_rows = []
+    for month, group in indexed.groupby(pd.Grouper(freq="MS")):
+        if group.empty:
+            continue
+        vis = group["visible_solar_disk_fraction"].to_numpy()
+        monthly_rows.append(
+            {
+                "month_utc": month,
+                "samples": int(vis.size),
+                "mean_visible_solar_disk_fraction": float(np.mean(vis)),
+                "hours_any_sun": float(np.sum(vis > 1e-6) * step_hours),
+                "hours_full_sun": float(np.sum(vis >= 1 - 1e-6) * step_hours),
+                "longest_continuous_darkness_hours_within_month": consecutive_max(vis <= 1e-6) * step_hours,
+            }
+        )
+    monthly = pd.DataFrame(monthly_rows)
+
+    states = classify_visibility(df["visible_solar_disk_fraction"].to_numpy())
+    flat = df["zero_horizon_visible_fraction"].to_numpy()
+    vis = df["visible_solar_disk_fraction"].to_numpy()
+    dark_runs = transitions[transitions["state"] == "dark"]
+    full_runs = transitions[transitions["state"] == "full"]
+    illuminated_runs = run_table(df["timestamp_utc"], np.where(vis > 1e-6, "lit", "dark"), TIME_STEP_MIN)
+    lit_only = illuminated_runs[illuminated_runs["state"] == "lit"]
+    stats = {
+        "time_range_utc": [START_UTC, END_UTC],
+        "time_step_minutes": TIME_STEP_MIN,
+        "sample_count": int(df.shape[0]),
+        "mean_visible_solar_disk_fraction": float(np.mean(vis)),
+        "fraction_of_time_any_sun_visible": float(np.mean(vis > 1e-6)),
+        "fraction_of_time_full_solar_disk_visible": float(np.mean(vis >= 1 - 1e-6)),
+        "zero_horizon_fraction_of_time_any_sun_visible": float(np.mean(flat > 1e-6)),
+        "longest_continuous_darkness_hours": float(dark_runs["duration_hours"].max()) if not dark_runs.empty else 0.0,
+        "longest_continuous_full_sun_hours": float(full_runs["duration_hours"].max()) if not full_runs.empty else 0.0,
+        "longest_continuous_any_sun_hours": float(lit_only["duration_hours"].max()) if not lit_only.empty else 0.0,
+        "visibility_transition_count": int(max(0, transitions.shape[0] - 1)),
+        "minimum_sun_center_altitude_deg": float(df["sun_center_altitude_deg"].min()),
+        "maximum_sun_center_altitude_deg": float(df["sun_center_altitude_deg"].max()),
+    }
+    return monthly, stats
+
+
+def save_horizon_csv(profile: HorizonProfile, out_dir: Path) -> Path:
+    frame = pd.DataFrame(
+        {
+            "azimuth_deg_clockwise_from_north": profile.azimuth_deg,
+            "raw_terrain_horizon_elevation_deg": profile.raw_elevation_deg,
+            "terrain_horizon_elevation_deg": profile.elevation_deg,
+            "controlling_distance_km": profile.controlling_distance_m / 1000.0,
+            "controlling_surface_elevation_m": profile.controlling_surface_elevation_m,
+            "controlling_terrain_level": profile.controlling_source,
+        }
+    )
+    path = out_dir / "ce7_terrain_horizon.csv"
+    frame.to_csv(path, index=False, float_format="%.8f")
+    return path
+
+
+def plot_main(df: pd.DataFrame, stats: dict[str, Any], site_elevation_m: float, out_dir: Path) -> list[Path]:
+    t = pd.DatetimeIndex(df["timestamp_utc"])
+    alt = df["sun_center_altitude_deg"].to_numpy()
+    horizon = df["terrain_horizon_deg"].to_numpy()
+    vis = df["visible_solar_disk_fraction"].to_numpy()
+    flat = df["zero_horizon_visible_fraction"].to_numpy()
+    samples_per_lunation = max(1, round(29.53059 * 24 * 60 / TIME_STEP_MIN))
+    rolling = pd.Series(vis).rolling(samples_per_lunation, center=True, min_periods=1).mean().to_numpy()
+
+    fig, axes = plt.subplots(3, 1, figsize=(18, 11), sharex=True, height_ratios=(1.45, 1.0, 0.75), constrained_layout=True)
+    sun_line = axes[0].plot(t, alt, linewidth=0.8, label="Sun-center elevation")[0]
+    horizon_line = axes[0].plot(t, horizon, linewidth=0.7, label="Terrain horizon at Sun azimuth")[0]
+    axes[0].fill_between(t, horizon, alt, where=vis > 1e-6, alpha=0.20, color=sun_line.get_color(), label="At least part of solar disk visible")
+    axes[0].axhline(0.0, linewidth=0.7, linestyle="--", label="Local horizontal plane")
+    axes[0].set_ylabel("Elevation (degrees)")
+    axes[0].set_ylim(min(-4.0, float(np.nanmin(horizon)) - 0.3, float(np.nanmin(alt)) - 0.3), max(4.0, float(np.nanmax(horizon)) + 0.3, float(np.nanmax(alt)) + 0.3))
+    axes[0].legend(loc="upper right", ncols=2, frameon=True)
+    axes[0].grid(True, linewidth=0.4, alpha=0.35)
+
