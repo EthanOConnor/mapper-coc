@@ -27,6 +27,7 @@
 
 namespace OpenOrienteering {
 
+struct GnssPosition;
 class MapWidget;
 class Template;
 class TemplateTrack;
@@ -39,18 +40,28 @@ class GPSTrackRecorder : public QObject
 Q_OBJECT
 public:
 	GPSTrackRecorder(GPSDisplay* gps_display, TemplateTrack* target_template, int draw_update_interval_milliseconds = -1, MapWidget* widget = nullptr);
+	~GPSTrackRecorder() override;
+
+	/// The recording target, or nullptr after the template was deleted.
+	TemplateTrack* targetTemplate() const { return is_active ? target_template : nullptr; }
 
 public slots:
+	/// Records a full GNSS fix, preserving quality metadata and the fix's own timestamp.
+	void newGnssPosition(const OpenOrienteering::GnssPosition& position, const QString& accuracy_basis);
+	/// Legacy entry point without GNSS quality metadata. The accuracy is
+	/// horizontal accuracy in meters (not DOP); -1 means unknown.
 	void newPosition(double latitude, double longitude, double altitude, float accuracy);
 	void positionUpdatesInterrupted();
 	void templateDeleted(int pos, const OpenOrienteering::Template* old_temp);
 	void drawUpdate();
+	void persistUpdate();
 	
 private:
 	GPSDisplay* gps_display;
 	TemplateTrack* target_template;
 	MapWidget* widget;
 	QTimer draw_update_timer;
+	QTimer persist_timer;
 	bool track_changed_since_last_update;
 	bool is_active;
 };

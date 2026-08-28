@@ -211,6 +211,20 @@ public:
 	 * behaviour.
 	 */
 	void setNmeaSerialPort(const QString& name);
+
+	QString gnssDeviceAddress() const { return sensors.gnss_device_address; }
+	QString gnssDeviceName() const { return sensors.gnss_device_name; }
+	bool gnssAutoConnect() const { return sensors.gnss_auto_connect; }
+	bool gnssAutoStartNtrip() const { return sensors.gnss_auto_start_ntrip; }
+	bool gnssRawLogging() const { return sensors.gnss_raw_logging; }
+	QString gnssNtripActiveProfile() const { return sensors.gnss_ntrip_active_profile; }
+
+	void setGnssDeviceAddress(const QString& address);
+	void setGnssDeviceName(const QString& name);
+	void setGnssAutoConnect(bool enabled);
+	void setGnssAutoStartNtrip(bool enabled);
+	void setGnssRawLogging(bool enabled);
+	void setGnssNtripActiveProfile(const QString& profile);
 	
 	/// Returns a vector of colors for paint on template tool.
 	std::vector<QColor> paintOnTemplateColors() const;
@@ -244,6 +258,12 @@ private:
 	struct {
 		QString position_source = {};
 		QString nmea_serialport = {};
+		QString gnss_device_address = {};
+		QString gnss_device_name = {};
+		bool gnss_auto_connect = true;
+		bool gnss_auto_start_ntrip = false;
+		bool gnss_raw_logging = false;
+		QString gnss_ntrip_active_profile = {};
 	} sensors;
 	
 #ifndef Q_OS_ANDROID

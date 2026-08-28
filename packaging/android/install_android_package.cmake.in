@@ -37,6 +37,44 @@ set(ANDROID_PACKAGE_SOURCE_DIR "@ANDROID_PACKAGE_SOURCE_DIR@")
 file(INSTALL "@MAPPER_PRO_DIR@/AndroidManifest.xml" DESTINATION "${ANDROID_PACKAGE_SOURCE_DIR}")
 file(INSTALL "@MAPPER_PRO_DIR@/tmp/strings.xml" DESTINATION "${ANDROID_PACKAGE_SOURCE_DIR}/res/values")
 
+# USB serial driver library for the Android GNSS transport
+# (MapperUsbSerial.java). The AAR is code-only, so its classes.jar can be
+# staged as a plain jar in libs/, which the stock androiddeployqt gradle
+# template picks up without any build.gradle customization.
+# License: MPL 2.0 (GPLv3-compatible).
+set(USB_SERIAL_VERSION "3.10.0")
+set(USB_SERIAL_AAR_URL
+  "https://jitpack.io/com/github/mik3y/usb-serial-for-android/${USB_SERIAL_VERSION}/usb-serial-for-android-${USB_SERIAL_VERSION}.aar")
+set(USB_SERIAL_AAR_SHA256
+  "0397e1a9ef44ab986ce93aea7631e75cd42eeb45d65618144197ffff06e34959")
+set(USB_SERIAL_TMP "@MAPPER_PRO_DIR@/tmp/usb-serial-for-android")
+set(USB_SERIAL_AAR "${USB_SERIAL_TMP}/usb-serial-for-android-${USB_SERIAL_VERSION}.aar")
+if(NOT EXISTS "${USB_SERIAL_AAR}")
+	file(DOWNLOAD "${USB_SERIAL_AAR_URL}" "${USB_SERIAL_AAR}"
+	  EXPECTED_HASH SHA256=${USB_SERIAL_AAR_SHA256}
+	  STATUS usb_serial_download_status
+	)
+	list(GET usb_serial_download_status 0 usb_serial_download_code)
+	if(NOT usb_serial_download_code EQUAL 0)
+		file(REMOVE "${USB_SERIAL_AAR}")
+		message(FATAL_ERROR "Could not download usb-serial-for-android: ${usb_serial_download_status}")
+	endif()
+endif()
+if(NOT EXISTS "${USB_SERIAL_TMP}/classes.jar")
+	execute_process(
+	  COMMAND "${CMAKE_COMMAND}" -E tar xf "${USB_SERIAL_AAR}" classes.jar
+	  WORKING_DIRECTORY "${USB_SERIAL_TMP}"
+	  RESULT_VARIABLE usb_serial_extract_result
+	)
+	if(NOT usb_serial_extract_result EQUAL 0)
+		message(FATAL_ERROR "Could not extract classes.jar from usb-serial-for-android")
+	endif()
+endif()
+file(INSTALL "${USB_SERIAL_TMP}/classes.jar"
+  DESTINATION "${ANDROID_PACKAGE_SOURCE_DIR}/libs"
+  RENAME "usb-serial-for-android-${USB_SERIAL_VERSION}.jar"
+)
+
 set(MAPPER_APP_ID "@MAPPER_APP_ID@")
 set(Mapper_VERSION "@Mapper_VERSION@")
 foreach(file @INPUT_FILES@)

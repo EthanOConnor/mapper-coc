@@ -159,6 +159,8 @@ set(Mapper_Common_SRCS
   gui/print_widget.cpp
   gui/select_crs_dialog.cpp
   gui/settings_dialog.cpp
+  gnss/ui/gnss_settings_page.cpp
+  gnss/ui/ntrip_settings_widget.cpp
   gui/simple_course_dialog.cpp
   gui/task_dialog.cpp
   gui/text_browser_dialog.cpp
@@ -322,6 +324,7 @@ foreach(lib
   cove
   mapper-config
   mapper-gdal
+  mapper-gnss
   mapper-sensors
   printsupport
   scaling-icon-engine
@@ -363,6 +366,18 @@ if(ANDROID)
 	add_library(Mapper SHARED ${Mapper_SRCS})
 else()
 	add_executable(Mapper WIN32 MACOSX_BUNDLE ${Mapper_SRCS})
+	if(APPLE)
+		# CMake's default bundle plist has no privacy usage descriptions, and
+		# macOS terminates an app that touches CoreBluetooth without
+		# NSBluetoothAlwaysUsageDescription (needed for BLE GNSS receivers).
+		set_target_properties(Mapper PROPERTIES
+			MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+			MACOSX_BUNDLE_BUNDLE_NAME "OpenOrienteering Mapper"
+			MACOSX_BUNDLE_BUNDLE_VERSION "${Mapper_VERSION}"
+			MACOSX_BUNDLE_GUI_IDENTIFIER "org.openorienteering.mapper"
+			MACOSX_BUNDLE_SHORT_VERSION_STRING "${Mapper_VERSION}"
+		)
+	endif()
 	target_compile_definitions(Mapper PRIVATE MAPPER_USE_QTSINGLEAPPLICATION)
 	target_link_libraries(Mapper QtSingleApplication)
 endif()
@@ -397,6 +412,7 @@ install(TARGETS Mapper
 add_custom_target(Mapper_Android SOURCES
   android/java/org/openorienteering/mapper/MapperActivity.java
   android/java/org/openorienteering/mapper/MapperService.java
+  android/java/org/openorienteering/mapper/MapperUsbSerial.java
 )
 
 

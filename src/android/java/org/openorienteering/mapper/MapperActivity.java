@@ -69,6 +69,12 @@ public class MapperActivity extends org.qtproject.qt5.android.bindings.QtActivit
 		instance = this;
 	}
 	
+	/** The current activity instance, or null before onCreate. */
+	public static MapperActivity currentActivity()
+	{
+		return instance;
+	}
+	
 	/** Call setIntent, as recommended for singleTask launch mode. */
 	@Override
 	public void onNewIntent(Intent intent)

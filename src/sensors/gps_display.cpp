@@ -35,6 +35,7 @@ Q_DECLARE_METATYPE(QGeoPositionInfo)  // QTBUG-65937
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <type_traits>
 
 #include <Qt>
@@ -56,6 +57,8 @@ Q_DECLARE_METATYPE(QGeoPositionInfo)  // QTBUG-65937
 #include "core/map_view.h"
 #include "gui/util_gui.h"
 #include "gui/map/map_widget.h"
+#include "gnss/gnss_position.h"
+#include "gnss/gnss_session.h"
 #include "sensors/compass.h"
 #include "util/backports.h"  // IWYU pragma: keep
 
@@ -131,6 +134,8 @@ GPSDisplay::GPSDisplay(MapWidget* widget, const Georeferencing& georeferencing, 
 		qputenv("QT_NMEA_SERIAL_PORT", nmea_serialport.toUtf8());
 	
 	auto source_name = settings.positionSource();
+	if (source_name.startsWith(QLatin1String("external_")))
+		source_name.clear();
 	if (source_name.isEmpty())
 	{
 		source_name = QLatin1String("default");
@@ -192,6 +197,8 @@ bool GPSDisplay::checkGPSEnabled()
 void GPSDisplay::startUpdates()
 {
 #if defined(QT_POSITIONING_LIB)
+	if (external_session)
+		return;
 	if (source)
 	{
 		checkGPSEnabled();
@@ -203,11 +210,49 @@ void GPSDisplay::startUpdates()
 void GPSDisplay::stopUpdates()
 {
 #if defined(QT_POSITIONING_LIB)
-	if (source)
-	{
+	if (source && !external_session)
 		source->stopUpdates();
+	has_valid_position = false;
+#endif
+}
+
+void GPSDisplay::setGnssSession(GnssSession* session)
+{
+	if (external_session == session)
+		return;
+	if (external_session)
+		disconnect(external_session, nullptr, this, nullptr);
+	external_session = session;
+	has_valid_position = false;
+	gps_updated = false;
+	tracking_lost = false;
+#if defined(QT_POSITIONING_LIB)
+	latest_position_info = {};
+#endif
+	if (!external_session)
+		return;
+#if defined(QT_POSITIONING_LIB)
+	if (source)
+		source->stopUpdates();
+	connect(external_session, &GnssSession::positionUpdated,
+	        this, &GPSDisplay::externalPositionUpdated);
+	connect(external_session, &GnssSession::stateChanged, this,
+	        [this](const GnssState& state) {
+		if (state.solution.hasFreshPosition)
+			return;
+		if (!tracking_lost && has_valid_position)
+		{
+			tracking_lost = true;
+			has_valid_position = false;
+			emit positionUpdatesInterrupted();
+			updateMapWidget();
+		}
+	});
+	connect(external_session, &QObject::destroyed, this, [this] {
+		external_session = nullptr;
 		has_valid_position = false;
-	}
+		latest_position_info = {};
+	});
 #endif
 }
 
@@ -376,11 +421,21 @@ void GPSDisplay::timerEvent(QTimerEvent* e)
 
 void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 {
+	// Position from the platform QGeoPositionInfoSource: no full GNSS fix is
+	// available, so a GnssPosition is synthesized for gnssPositionUpdated().
+	processPositionUpdate(info, true);
+}
+
+void GPSDisplay::processPositionUpdate(const QGeoPositionInfo& info, bool synthesize_gnss_position)
+{
 #if defined(QT_POSITIONING_LIB)
+	if (!info.isValid())
+		return;
+	latest_position_info = info;
 	gps_updated = true;
 	tracking_lost = false;
 	has_valid_position = true;
-	
+
 	bool ok = false;
 	calcLatestGPSCoord(ok);
 	if (ok)
@@ -392,9 +447,77 @@ void GPSDisplay::positionUpdated(const QGeoPositionInfo& info)
 			(info.coordinate().type() == QGeoCoordinate::Coordinate3D) ? info.coordinate().altitude() : -9999,
 			latest_gps_coord_accuracy
 		);
+		if (synthesize_gnss_position)
+		{
+			GnssPosition position;
+			position.latitude = info.coordinate().latitude();
+			position.longitude = info.coordinate().longitude();
+			if (info.coordinate().type() == QGeoCoordinate::Coordinate3D)
+				position.altitudeMsl = info.coordinate().altitude();
+			position.fixType = (info.coordinate().type() == QGeoCoordinate::Coordinate3D)
+			                   ? GnssFixType::Fix3D : GnssFixType::Fix2D;
+			if (info.hasAttribute(QGeoPositionInfo::HorizontalAccuracy))
+				position.hAccuracy = float(info.attribute(QGeoPositionInfo::HorizontalAccuracy));
+			if (info.hasAttribute(QGeoPositionInfo::VerticalAccuracy))
+				position.vAccuracy = float(info.attribute(QGeoPositionInfo::VerticalAccuracy));
+			// Platform accuracies (Android, iOS) are 1-sigma radial.
+			position.accuracyBasis = GnssAccuracyBasis::Sigma68;
+			position.computeP95();
+			if (info.hasAttribute(QGeoPositionInfo::GroundSpeed))
+				position.groundSpeed = float(info.attribute(QGeoPositionInfo::GroundSpeed));
+			if (info.hasAttribute(QGeoPositionInfo::Direction))
+				position.headingMotion = float(info.attribute(QGeoPositionInfo::Direction));
+			position.timestamp = info.timestamp().toUTC();
+			position.valid = true;
+			emit gnssPositionUpdated(position, QStringLiteral("platform"));
+		}
 	}
-	
+
 	updateMapWidget();
+#else
+	Q_UNUSED(info)
+	Q_UNUSED(synthesize_gnss_position)
+#endif
+}
+
+void GPSDisplay::externalPositionUpdated(const GnssPosition& position)
+{
+#if defined(QT_POSITIONING_LIB)
+	if (!position.valid)
+		return;
+	// Full fix first: consumers such as the track recorder must see the
+	// complete GNSS quality data before it is collapsed to QGeoPositionInfo.
+	emit gnssPositionUpdated(position, QString());
+	auto altitude = std::isfinite(position.altitudeMsl)
+	              ? position.altitudeMsl : position.altitude;
+	QGeoCoordinate coordinate;
+	if (std::isfinite(altitude))
+		coordinate = QGeoCoordinate(
+		  position.latitude, position.longitude, altitude);
+	else
+		coordinate = QGeoCoordinate(position.latitude, position.longitude);
+	QGeoPositionInfo info(
+	  coordinate,
+	  position.timestamp.isValid()
+	    ? position.timestamp : QDateTime::currentDateTimeUtc());
+	if (std::isfinite(position.hAccuracyP95))
+		info.setAttribute(QGeoPositionInfo::HorizontalAccuracy,
+		                  position.hAccuracyP95);
+	else if (std::isfinite(position.hAccuracy))
+		info.setAttribute(QGeoPositionInfo::HorizontalAccuracy,
+		                  position.hAccuracy);
+	if (std::isfinite(position.vAccuracyP95))
+		info.setAttribute(QGeoPositionInfo::VerticalAccuracy,
+		                  position.vAccuracyP95);
+	if (std::isfinite(position.groundSpeed))
+		info.setAttribute(QGeoPositionInfo::GroundSpeed,
+		                  position.groundSpeed);
+	if (std::isfinite(position.headingMotion))
+		info.setAttribute(QGeoPositionInfo::Direction,
+		                  position.headingMotion);
+	processPositionUpdate(info, false);
+#else
+	Q_UNUSED(position)
 #endif
 }
 
@@ -438,7 +561,7 @@ MapCoordF GPSDisplay::calcLatestGPSCoord(bool& ok)
 		return latest_gps_coord;
 	}
 	
-	const auto latest_pos_info = source->lastKnownPosition(true);
+	const auto latest_pos_info = latest_position_info;
 	latest_gps_coord_accuracy = latest_pos_info.hasAttribute(QGeoPositionInfo::HorizontalAccuracy)
 	                            ? float(latest_pos_info.attribute(QGeoPositionInfo::HorizontalAccuracy))
 	                            : -1;

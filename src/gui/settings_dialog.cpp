@@ -56,6 +56,7 @@
 #include "gui/widgets/editor_settings_page.h"
 #include "gui/widgets/general_settings_page.h"
 #include "gui/widgets/paint_on_template_settings_page.h"
+#include "gnss/ui/gnss_settings_page.h"
 #include "gui/widgets/settings_page.h"
 #include "util/backports.h" // IWYU pragma: keep
 
@@ -221,6 +222,9 @@ void SettingsDialog::addPages()
 #endif
 #ifdef MAPPER_USE_SENSORS
 	addPage(new SensorsSettingsPage(this));
+#endif
+#ifdef MAPPER_GNSS_AVAILABLE
+	addPage(new GnssSettingsPage(this));
 #endif
     addPage(new PaintOnTemplateSettingsPage(this));
 }

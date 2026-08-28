@@ -220,6 +220,11 @@ add_system_test(track_t)  # Could be unit test, but needs Georeferencing
 add_system_test(transform_t)
 add_system_test(undo_manager_t)
 
+if(TARGET mapper-gnss)
+	add_system_test(gnss_protocol_t)
+	target_link_libraries(gnss_protocol_t PRIVATE mapper-gnss)
+endif()
+
 if(TARGET mapper-sensors)
 	add_system_test(sensors_t)
 	target_link_libraries(sensors_t  PRIVATE mapper-sensors)

@@ -28,7 +28,12 @@
 
 #include "core/map_coord.h"
 
+#if defined(QT_POSITIONING_LIB)
+#  include <QGeoPositionInfo>
+#else
 class QGeoPositionInfo;
+#endif
+
 class QGeoPositionInfoSource;
 class QPainter;
 class QTimerEvent;
@@ -36,6 +41,8 @@ class QTimerEvent;
 namespace OpenOrienteering {
 
 class Georeferencing;
+struct GnssPosition;
+class GnssSession;
 class MapWidget;
 
 
@@ -69,6 +76,10 @@ public:
 	void startUpdates();
 	/// Stops regular position updates.
 	void stopUpdates();
+
+	/// Selects an external native GNSS session. Passing nullptr restores the
+	/// system location source without rebuilding the editor.
+	void setGnssSession(GnssSession* session);
 	
 	/// Sets GPS marker visibility (true by default)
 	void setVisible(bool visible);
@@ -112,6 +123,14 @@ signals:
 	/// latitude / longitude in degrees and also gives altitude
 	/// (meters above sea level; -9999 is unknown)
 	void latLonUpdated(double latitude, double longitude, double altitude, float accuracy);
+
+	/// Is emitted whenever a new position update happens, carrying the full
+	/// GNSS fix before it is collapsed to a QGeoPositionInfo. For positions
+	/// from the platform position source (no external GNSS session), a
+	/// GnssPosition is synthesized from the QGeoPositionInfo attributes and
+	/// accuracy_basis is "platform". For external sessions, accuracy_basis
+	/// is empty (unknown at this layer).
+	void gnssPositionUpdated(const OpenOrienteering::GnssPosition& position, const QString& accuracy_basis);
 	
 	/// Is emitted when updates are interrupted after previously being active,
 	/// due to loss of satellite reception or another error such as the user
@@ -119,11 +138,13 @@ signals:
 	void positionUpdatesInterrupted();
 	
 private slots:
-    void positionUpdated(const QGeoPositionInfo& info);
+	void positionUpdated(const QGeoPositionInfo& info);
+	void externalPositionUpdated(const OpenOrienteering::GnssPosition& position);
 	void error();
 	void updateTimeout();
 	
 private:
+	void processPositionUpdate(const QGeoPositionInfo& info, bool synthesize_gnss_position);
 	MapCoordF calcLatestGPSCoord(bool& ok);
 	void updateMapWidget();
 	
@@ -160,6 +181,10 @@ private:
 	MapWidget* widget;
 	const Georeferencing& georeferencing;
 	QGeoPositionInfoSource* source = nullptr;
+	GnssSession* external_session = nullptr;
+#if defined(QT_POSITIONING_LIB)
+	QGeoPositionInfo latest_position_info = {};
+#endif
 	MapCoordF latest_gps_coord;
 	float latest_gps_coord_accuracy = 0;
 	PulsatingOpacity pulsating_opacity;

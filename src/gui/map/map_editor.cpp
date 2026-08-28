@@ -136,6 +136,8 @@
 #include "gui/widgets/tags_widget.h"
 #include "gui/widgets/template_list_widget.h"
 #include "sensors/compass.h"
+#include "gnss/gnss_controller.h"
+#include "gnss/gnss_session.h"
 #include "sensors/gps_display.h"
 #include "sensors/gps_temporary_markers.h"
 #include "sensors/gps_track_recorder.h"
@@ -789,6 +791,41 @@ void MapEditorController::attach(MainWindow* window)
 		gps_marker_display = new GPSTemporaryMarkers(map_widget, gps_display);
 		
 		createActions();
+#ifdef MAPPER_GNSS_AVAILABLE
+		// An external receiver session outlives individual map windows, so the
+		// editor follows the application-scoped controller rather than owning
+		// the connection.
+		auto& gnss_controller = GnssController::instance();
+		connect(&gnss_controller, &GnssController::sessionChanged, this,
+		        [this](GnssSession* session) {
+			if (!gps_display || !gps_display_action
+			    || !gps_display_action->isChecked()
+			    || !Settings::getInstance().positionSource()
+			          .startsWith(QLatin1String("external_")))
+				return;
+			gps_display->setGnssSession(session);
+		});
+		connect(&gnss_controller, &GnssController::internalLocationRequested,
+		        this, [this] {
+			if (!gps_display || !gps_display_action
+			    || !gps_display_action->isChecked())
+				return;
+			gps_display->setGnssSession(nullptr);
+			gps_display->startUpdates();
+		});
+		connect(&gnss_controller, &GnssController::connectionCancelled,
+		        this, [this] {
+			if (gps_display && gps_display_action
+			    && gps_display_action->isChecked())
+				enableGPSDisplay(false);
+		});
+		connect(&gnss_controller, &GnssController::errorOccurred,
+		        this, [this](const QString& source, const QString& message) {
+			if (auto* main_window = getWindow())
+				main_window->showStatusBarMessage(
+				  tr("%1: %2").arg(source, message), 12000);
+		});
+#endif
 		if (mobile_mode)
 		{
 			createMobileGUI();
@@ -3583,7 +3620,24 @@ void MapEditorController::enableGPSDisplay(bool enable)
 {
 	if (enable)
 	{
+#ifdef MAPPER_GNSS_AVAILABLE
+		// "external_..." position sources are served by a native GNSS session
+		// (Bluetooth LE, USB serial, or TCP receiver) instead of the platform
+		// location service.
+		if (Settings::getInstance().positionSource().startsWith(QLatin1String("external_")))
+		{
+			auto& controller = GnssController::instance();
+			controller.connectExternal(window);
+			gps_display->setGnssSession(controller.session());
+		}
+		else
+		{
+			gps_display->setGnssSession(nullptr);
+			gps_display->startUpdates();
+		}
+#else
 		gps_display->startUpdates();
+#endif
 		
 		// Create gps_track_recorder if we can determine a template track filename
 		constexpr int gps_track_draw_update_interval = 10 * 1000; // in milliseconds
@@ -3648,6 +3702,10 @@ void MapEditorController::enableGPSDisplay(bool enable)
 	else
 	{
 		gps_display->stopUpdates();
+#ifdef MAPPER_GNSS_AVAILABLE
+		gps_display->setGnssSession(nullptr);
+		GnssController::instance().disconnectExternal();
+#endif
 		
 		delete gps_track_recorder;
 		gps_track_recorder = nullptr;
