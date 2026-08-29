@@ -21,6 +21,9 @@
 
 #include <QDateTime>
 #include <QRandomGenerator>
+// qtnetworkglobal.h defines QT_NO_SSL for SSL-less Qt builds; it must be
+// seen before the guard below can work.
+#include <QtNetwork/qtnetworkglobal.h>
 #ifndef QT_NO_SSL
 #  include <QSslError>
 #  include <QSslSocket>
