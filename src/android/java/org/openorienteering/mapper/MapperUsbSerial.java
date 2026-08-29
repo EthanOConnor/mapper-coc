@@ -346,7 +346,7 @@ public class MapperUsbSerial
 		ensurePermissionReceiver(context);
 		int flags = PendingIntent.FLAG_UPDATE_CURRENT;
 		if (Build.VERSION.SDK_INT >= 31)  // Build.VERSION_CODES.S
-			flags |= PendingIntent.FLAG_MUTABLE;
+			flags |= 0x02000000;  // PendingIntent.FLAG_MUTABLE; literal for old compile SDKs
 		Intent intent = new Intent(ACTION_USB_PERMISSION).setPackage(context.getPackageName());
 		PendingIntent pendingIntent = PendingIntent.getBroadcast(
 		    context, device.getDeviceName().hashCode(), intent, flags);
@@ -360,7 +360,7 @@ public class MapperUsbSerial
 
 		IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
 		if (Build.VERSION.SDK_INT >= 33)  // Build.VERSION_CODES.TIRAMISU
-			context.registerReceiver(permissionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+			context.registerReceiver(permissionReceiver, filter, 4 /* Context.RECEIVER_NOT_EXPORTED; literal for old compile SDKs */);
 		else
 			context.registerReceiver(permissionReceiver, filter);
 		receiverRegistered = true;
