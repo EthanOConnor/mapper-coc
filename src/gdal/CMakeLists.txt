@@ -71,6 +71,13 @@ target_link_libraries(mapper-gdal ${GDAL_LIBRARIES} Qt5::Core Qt5::Gui Qt5::Widg
 
 set_target_properties(mapper-gdal PROPERTIES PREFIX "")
 
+# mapper-gdal and Mapper_Common are mutually dependent static archives.
+# The default two passes over the cycle are not always enough for GNU ld:
+# gnss_protocol_t's link order pulls ogr_template.cpp's objects only on
+# the second mapper-gdal pass, leaving TemplatePositioningDialog symbols
+# unresolved. Three passes let the closure converge.
+set_target_properties(mapper-gdal PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
+
 install(FILES mapper-osmconf.ini DESTINATION "${MAPPER_DATA_DESTINATION}/gdal")
 
 # Let mapper-osmconf.ini be found via "data:/gdal" during development.

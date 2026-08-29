@@ -35,8 +35,10 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QSslError>
-#include <QSslSocket>
+#ifndef QT_NO_SSL
+#  include <QSslError>
+#  include <QSslSocket>
+#endif
 #include <QSpinBox>
 #include <QString>
 #include <QStringList>
@@ -351,9 +353,20 @@ void NtripSettingsWidget::testConnection()
 	test_status_label->setText(tr("Connecting to %1:%2...").arg(profile.casterHost).arg(profile.casterPort));
 	test_button->setEnabled(false);
 
+#ifndef QT_NO_SSL
 	test_socket = profile.useTls
 	    ? static_cast<QTcpSocket*>(new QSslSocket(this))
 	    : new QTcpSocket(this);
+#else
+	// The Qt 5.12 Android superbuild ships without SSL support.
+	if (profile.useTls)
+	{
+		test_status_label->setText(tr("This build does not support TLS NTRIP casters"));
+		test_button->setEnabled(true);
+		return;
+	}
+	test_socket = new QTcpSocket(this);
+#endif
 
 	// Build NTRIP v2 request (matches what the live client sends in Auto mode)
 	QByteArray request;
@@ -379,6 +392,7 @@ void NtripSettingsWidget::testConnection()
 		test_socket->write(request);
 		test_status_label->setText(tr("Connected. Waiting for response..."));
 	};
+#ifndef QT_NO_SSL
 	if (auto* ssl_socket = qobject_cast<QSslSocket*>(test_socket))
 	{
 		connect(ssl_socket, &QSslSocket::connected, this, [this]() {
@@ -396,6 +410,7 @@ void NtripSettingsWidget::testConnection()
 		});
 	}
 	else
+#endif
 	{
 		connect(test_socket, &QTcpSocket::connected, this, send_request);
 	}
@@ -475,10 +490,12 @@ void NtripSettingsWidget::testConnection()
 		test_button->setEnabled(true);
 	});
 
+#ifndef QT_NO_SSL
 	if (auto* ssl_socket = qobject_cast<QSslSocket*>(test_socket))
 		ssl_socket->connectToHostEncrypted(
 		  profile.casterHost, profile.casterPort);
 	else
+#endif
 		test_socket->connectToHost(profile.casterHost, profile.casterPort);
 }
 

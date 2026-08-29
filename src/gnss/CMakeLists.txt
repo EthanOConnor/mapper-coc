@@ -77,6 +77,10 @@ set(MAPPER_GNSS_SOURCES
 )
 
 set(MAPPER_GNSS_PRIVATE_LIBRARIES Qt5::Network minmea)
+if(WIN32)
+	# tcp_transport.cpp calls setsockopt() directly for keepalive/nodelay.
+	list(APPEND MAPPER_GNSS_PRIVATE_LIBRARIES ws2_32)
+endif()
 
 if(TARGET Qt5::Bluetooth)
 	list(APPEND MAPPER_GNSS_SOURCES transport/ble_transport.cpp)

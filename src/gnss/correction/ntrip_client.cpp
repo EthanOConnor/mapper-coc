@@ -21,8 +21,10 @@
 
 #include <QDateTime>
 #include <QRandomGenerator>
-#include <QSslError>
-#include <QSslSocket>
+#ifndef QT_NO_SSL
+#  include <QSslError>
+#  include <QSslSocket>
+#endif
 
 namespace OpenOrienteering {
 
@@ -194,9 +196,21 @@ void NtripClient::attemptConnect()
 		m_socket = nullptr;
 	}
 
+#ifndef QT_NO_SSL
 	m_socket = m_profile.useTls
 	    ? static_cast<QTcpSocket*>(new QSslSocket(this))
 	    : new QTcpSocket(this);
+#else
+	// The Qt 5.12 Android superbuild ships without SSL support: a TLS
+	// profile cannot silently fall back to plain TCP, so refuse it.
+	if (m_profile.useTls)
+	{
+		setState(State::Disconnected);
+		emit errorOccurred(QStringLiteral("This build does not support TLS NTRIP casters"));
+		return;
+	}
+	m_socket = new QTcpSocket(this);
+#endif
 	m_headersParsed = false;
 	m_headerBuffer.clear();
 	m_bodyPreambleFilter.reset();
@@ -205,6 +219,7 @@ void NtripClient::attemptConnect()
 	m_socket->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
 	m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
 
+#ifndef QT_NO_SSL
 	if (auto* ssl_socket = qobject_cast<QSslSocket*>(m_socket))
 	{
 		connect(ssl_socket, &QSslSocket::encrypted,
@@ -221,6 +236,7 @@ void NtripClient::attemptConnect()
 		});
 	}
 	else
+#endif
 	{
 		connect(m_socket, &QTcpSocket::connected,
 		        this, &NtripClient::onSocketConnected);
@@ -239,10 +255,12 @@ void NtripClient::attemptConnect()
 	        this, &NtripClient::onSocketError);
 #endif
 
+#ifndef QT_NO_SSL
 	if (auto* ssl_socket = qobject_cast<QSslSocket*>(m_socket))
 		ssl_socket->connectToHostEncrypted(
 		  m_profile.casterHost, m_profile.casterPort);
 	else
+#endif
 		m_socket->connectToHost(m_profile.casterHost, m_profile.casterPort);
 }
 
