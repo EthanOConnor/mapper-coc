@@ -22,6 +22,9 @@ find_package(Qt5Widgets REQUIRED)
 
 if(ANDROID)
 	find_package(Qt5AndroidExtras REQUIRED)
+	# Mapper_Common compiles the NTRIP settings widget (see the GNSS UI
+	# sources below), so it needs QtNetwork headers on Android too.
+	find_package(Qt5Network REQUIRED)
 else()
 	find_package(Qt5Network REQUIRED)
 	find_package(Qt5PrintSupport REQUIRED)
