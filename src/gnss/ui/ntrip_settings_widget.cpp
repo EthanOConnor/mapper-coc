@@ -446,9 +446,15 @@ void NtripSettingsWidget::testConnection()
 		test_button->setEnabled(true);
 	});
 
-	// On error
+	// On error. (errorOccurred arrived in Qt 5.15; the Android superbuild
+	// is on Qt 5.12, where the signal is the overloaded error().)
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
 	connect(test_socket, &QTcpSocket::errorOccurred, this,
 	        [this](QAbstractSocket::SocketError) {
+#else
+	connect(test_socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
+	        this, [this](QAbstractSocket::SocketError) {
+#endif
 		test_status_label->setText(
 		    tr("Connection failed: %1").arg(test_socket->errorString()));
 		test_socket->disconnect(this);

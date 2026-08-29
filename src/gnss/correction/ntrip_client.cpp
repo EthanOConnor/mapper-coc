@@ -229,8 +229,15 @@ void NtripClient::attemptConnect()
 	        this, &NtripClient::onSocketReadyRead);
 	connect(m_socket, &QTcpSocket::disconnected,
 	        this, &NtripClient::onSocketDisconnected);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
 	connect(m_socket, &QTcpSocket::errorOccurred,
 	        this, &NtripClient::onSocketError);
+#else
+	// QAbstractSocket::errorOccurred arrived in Qt 5.15; the Android
+	// superbuild is on Qt 5.12, where the signal is the overloaded error().
+	connect(m_socket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
+	        this, &NtripClient::onSocketError);
+#endif
 
 	if (auto* ssl_socket = qobject_cast<QSslSocket*>(m_socket))
 		ssl_socket->connectToHostEncrypted(

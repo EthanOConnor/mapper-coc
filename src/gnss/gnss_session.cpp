@@ -617,7 +617,9 @@ void GnssSession::resetSessionState()
 	auto deviceName = m_state.deviceName;
 	auto sessionStart = m_state.sessionStart;
 
-	m_state = {};
+	// Spelled with the explicit type: MinGW GCC rejects `m_state = {};` here
+	// ("no match for operator= from brace-enclosed initializer list").
+	m_state = GnssState{};
 	m_state.transportType = transportType;
 	m_state.deviceName = deviceName;
 	m_state.sessionStart = sessionStart;
