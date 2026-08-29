@@ -50,9 +50,11 @@ set(ANDROID_PACKAGE_SOURCE_DIR "${MAPPER_PRO_DIR}/${MAPPER_APP_ID}")
 
 
 if("${Qt5Core_VERSION}" VERSION_GREATER_EQUAL 5.13.0)
-	set(ANDROID_MIN_SDK_VERSION 21)
+	# usb-serial-for-android 3.10 uses invoke-dynamic byte code, which the
+	# legacy dexer only accepts from Android O on.
+	set(ANDROID_MIN_SDK_VERSION 26)
 elseif("${ANDROID_ABI}" MATCHES "64")
-	set(ANDROID_MIN_SDK_VERSION 21)
+	set(ANDROID_MIN_SDK_VERSION 26)
 else()
 	set(ANDROID_MIN_SDK_VERSION 16)
 endif()
