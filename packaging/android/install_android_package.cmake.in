@@ -36,6 +36,9 @@ endfunction()
 set(ANDROID_PACKAGE_SOURCE_DIR "@ANDROID_PACKAGE_SOURCE_DIR@")
 file(INSTALL "@MAPPER_PRO_DIR@/AndroidManifest.xml" DESTINATION "${ANDROID_PACKAGE_SOURCE_DIR}")
 file(INSTALL "@MAPPER_PRO_DIR@/tmp/strings.xml" DESTINATION "${ANDROID_PACKAGE_SOURCE_DIR}/res/values")
+# Gradle template overlay: carries the defaultConfig API levels the stock
+# template leaves to the manifest (which the dexer ignores).
+file(INSTALL "@MAPPER_PRO_DIR@/tmp/build.gradle" DESTINATION "${ANDROID_PACKAGE_SOURCE_DIR}")
 
 # USB serial driver library for the Android GNSS transport
 # (MapperUsbSerial.java). The AAR is code-only, so its classes.jar can be

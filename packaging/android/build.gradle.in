@@ -1,0 +1,56 @@
+// Overlay of Qt 5.12's android template build.gradle (staged through
+// ANDROID_PACKAGE_SOURCE_DIR, which androiddeployqt copies over the
+// template). The one functional change is the defaultConfig block: the
+// template leaves the API levels to the AndroidManifest, but the Android
+// Gradle plugin ignores manifest uses-sdk for dexing, and the USB serial
+// library's invoke-dynamic byte code needs min-api 26 there.
+
+buildscript {
+    repositories {
+        google()
+        jcenter()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.2.0'
+    }
+}
+
+repositories {
+    google()
+    jcenter()
+}
+
+apply plugin: 'com.android.application'
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+}
+
+android {
+    compileSdkVersion androidCompileSdkVersion.toInteger()
+
+    buildToolsVersion '28.0.3'
+
+    defaultConfig {
+        minSdkVersion @ANDROID_MIN_SDK_VERSION@
+        targetSdkVersion @ANDROID_TARGET_SDK_VERSION@
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qt5AndroidDir + '/src', 'src', 'java']
+            aidl.srcDirs = [qt5AndroidDir + '/src', 'src', 'aidl']
+            res.srcDirs = [qt5AndroidDir + '/res', 'res']
+            resources.srcDirs = ['src']
+            renderscript.srcDirs = ['src']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+       }
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+}

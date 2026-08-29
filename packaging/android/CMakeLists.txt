@@ -127,6 +127,12 @@ configure_file(
   @ONLY
 )
 
+configure_file(
+  "build.gradle.in"
+  "${MAPPER_PRO_DIR}/tmp/build.gradle"
+  @ONLY
+)
+
 # Setup ANDROID_PACKAGE_SOURCE_DIR for qmake/androiddeployqt
 get_target_property(INPUT_SOURCE_DIR Mapper_Android SOURCE_DIR)
 get_target_property(INPUT_FILES Mapper_Android SOURCES)
