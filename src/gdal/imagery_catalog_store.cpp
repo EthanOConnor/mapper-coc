@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
+#include <QMap>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
